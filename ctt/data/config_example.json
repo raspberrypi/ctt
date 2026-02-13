@@ -1,0 +1,26 @@
+{
+    "disable": [  ],
+    "plot": [  ],
+    "alsc":
+    {
+        "do_alsc_colour": 1,
+        "luminance_strength": 0.8,
+        "max_gain": 8
+    },
+    "awb":
+    {
+        "greyworld": 0
+    },
+    "blacklevel": -1,
+    "macbeth":
+    {
+        "small": 0,
+        "show": 0
+    },
+    "ccm":
+    {
+        "matrix_selection": "average",
+        "matrix_selection_types": [ "average", "maximum", "patches" ],
+        "test_patches": [ 1, 2, 5, 8, 9, 12, 14 ]
+    }
+}

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rpi-ctt"
+version = "1.0.0"
+description = "Raspberry Pi Camera Tuning Tool"
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.11"
+license = "BSD-2-Clause"
+authors = [{ name = "Raspberry Pi" }]
+dependencies = [
+    "colour-science",
+    "matplotlib",
+    "numpy",
+    "opencv-python",
+    "Pillow",
+    "py3exiv2",
+    "rawpy",
+    "scikit-learn",
+    "scipy",
+]
+
+[project.scripts]
+ctt = "ctt.ctt:main"
+
+[tool.setuptools.packages.find]
+include = ["ctt*"]
+
+[tool.setuptools.package-data]
+"ctt.data" = ["*.pgm", "*.json"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+
+[tool.ruff.format]
+quote-style = "single"
