@@ -26,6 +26,7 @@ def find_dots_locations(
     im_output = im_output.filter(ImageFilter.GaussianBlur(radius=2))
     bw_image = np.array(im_output)
 
+    random.seed(42)
     location = [0, 0]
     dots = []
     dots_location = []
