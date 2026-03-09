@@ -55,7 +55,7 @@ def convert_target(in_json: dict, target: str) -> dict:
         alsc['luminance_lut'] = np.round(out_ls.flatten(), 3).tolist()
 
     for i, algo in enumerate(in_json['algorithms']):
-        if list(algo.keys())[0] == 'rpi.sdn':
+        if 'rpi.sdn' in algo:
             in_json['algorithms'][i] = {
                 'rpi.denoise': json_template['rpi.sdn'] if target == 'vc4' else json_template['rpi.denoise']
             }
