@@ -11,15 +11,15 @@ requires-python = ">=3.11"
 license = "BSD-2-Clause"
 authors = [{ name = "Raspberry Pi" }]
 dependencies = [
-    "colour-science",
-    "matplotlib",
-    "numpy",
-    "opencv-python",
-    "Pillow",
-    "py3exiv2",
-    "rawpy",
-    "scikit-learn",
-    "scipy",
+    "colour-science>=0.4.7",
+    "matplotlib>=3.10",
+    "numpy>=2.4,<3",
+    "opencv-python>=4.13",
+    "Pillow>=12.1",
+    "py3exiv2>=0.12",
+    "rawpy>=0.26",
+    "scikit-learn>=1.8",
+    "scipy>=1.17",
 ]
 
 [project.scripts]
