@@ -17,7 +17,6 @@ def find_dots_locations(
     image_edge_avoid: int = 10,
     search_path_length: int = 500,
     grid_scan_step_size: int = 10,
-    logfile: object = None,
 ) -> tuple[list, list]:
     pixels = Image.fromarray(rgb_image)
     pixels = pixels.convert('L')

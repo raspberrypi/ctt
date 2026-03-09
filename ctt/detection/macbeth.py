@@ -25,10 +25,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def fxn():
-    warnings.warn('runtime', RuntimeWarning, stacklevel=2)
-
-
 success_msg = 'Macbeth chart located successfully'
 
 
@@ -36,7 +32,6 @@ def find_macbeth(cam: Camera, img: np.ndarray, mac_config: tuple[int, int] = (0,
     small_chart, show = mac_config
     cam.log += '\nLocating macbeth chart'
     warnings.simplefilter('ignore')
-    fxn()
 
     ref_path = resources.files('ctt.data') / 'ctt_ref.pgm'
     with resources.as_file(ref_path) as p:
