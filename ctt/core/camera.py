@@ -46,7 +46,7 @@ def get_col_lux(string: str) -> tuple[int | None, int | None]:
     try:
         lux = lux.group(1)
     except AttributeError:
-        return col, None
+        return int(col), None
     return int(col), int(lux)
 
 
