@@ -65,7 +65,7 @@ def geq_fit(cam: Camera, plot: bool = False) -> tuple[float, int]:
         cam.log += f'offset = {int(offset)}'
 
         if plot:
-            x = np.linspace(max(g0) * 1.1, 100)
+            x = np.linspace(0, max(g0) * 1.1, 100)
             y = slope * x + offset
             plt.title("GEQ Asymmetric 'Upper Bound' Fit")
             plt.plot(x, y, color='red', ls='--', label='fit')
@@ -99,7 +99,7 @@ def geq_fit(cam: Camera, plot: bool = False) -> tuple[float, int]:
         cam.log += f'offset = {int(offset)}'
 
         if plot:
-            x = np.linspace(max(g0) * 1.1, 100)
+            x = np.linspace(0, max(g0) * 1.1, 100)
             y = slope * x + offset
             plt.title('GEQ Linear Fit')
             plt.plot(x, y, color='red', ls='--', label='fit')
