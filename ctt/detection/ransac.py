@@ -6,10 +6,10 @@
 
 import numpy as np
 
-scale = 2
+_SCALE = 2
 
 
-def get_square_verts(c_err: float = 0.05, scale: int = scale) -> tuple[np.ndarray, np.ndarray]:
+def get_square_verts(c_err: float = 0.05, scale: int = _SCALE) -> tuple[np.ndarray, np.ndarray]:
     b_bord_x, b_bord_y = scale * 8.5, scale * 13
     s_bord = 6 * scale
     side = 41 * scale
@@ -41,7 +41,7 @@ def get_square_verts(c_err: float = 0.05, scale: int = scale) -> tuple[np.ndarra
     return np.array(square_verts, np.float32), mac_norm
 
 
-def get_square_centres(c_err: float = 0.05, scale: int = scale) -> np.ndarray:
+def get_square_centres(c_err: float = 0.05, scale: int = _SCALE) -> np.ndarray:
     verts, mac_norm = get_square_verts(c_err, scale=scale)
     centres = np.mean(verts, axis=1)
     return np.array(centres, np.float32)
