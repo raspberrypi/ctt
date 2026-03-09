@@ -64,7 +64,7 @@ def lux_calc(cam: Camera, img: Image, patches: list, channels: list) -> int:
     ap_g = (np.mean(patches[1][3::4]) + np.mean(patches[2][3::4])) / 2
     ap_b = np.mean(patches[3][3::4])
     cam.log += '\nAverage channel values on grey patches:'
-    cam.log += f'\nRed = {ap_r:.0f} Green = {ap_b:.0f} Blue = {ap_g:.0f}'
+    cam.log += f'\nRed = {ap_r:.0f} Green = {ap_g:.0f} Blue = {ap_b:.0f}'
     gr = ap_g / ap_r
     gb = ap_g / ap_b
     cam.log += f'\nChannel gains: Red = {gr:.3f} Blue = {gb:.3f}'
@@ -73,7 +73,7 @@ def lux_calc(cam: Camera, img: Image, patches: list, channels: list) -> int:
     a_g = (np.mean(channels[1]) + np.mean(channels[2])) / 2
     a_b = np.mean(channels[3]) * gb
     cam.log += '\nAverage channel values over entire image scaled by channel gains:'
-    cam.log += f'\nRed = {a_r:.0f} Green = {a_b:.0f} Blue = {a_g:.0f}'
+    cam.log += f'\nRed = {a_r:.0f} Green = {a_g:.0f} Blue = {a_b:.0f}'
     y = 0.299 * a_r + 0.587 * a_g + 0.114 * a_b
     cam.log += f'\nY value calculated: {int(y)}'
     return int(y)
