@@ -83,6 +83,7 @@
     },
     "rpi.awb":
     {
+	"enabled": true,
         "priors": [
             {
                 "lux": 0,
@@ -154,6 +155,51 @@
             }
         },
         "bayes": 1
+    },
+    "rpi.nn.awb":
+    {
+        "enabled": false,
+        "modes":
+        {
+            "auto":
+            {
+                "lo": 2500,
+                "hi": 7700
+            },
+            "incandescent":
+            {
+                "lo": 2500,
+                "hi": 3000
+            },
+            "tungsten":
+            {
+                "lo": 3000,
+                "hi": 3500
+            },
+            "fluorescent":
+            {
+                "lo": 4000,
+                "hi": 4700
+            },
+            "indoor":
+            {
+                "lo": 3000,
+                "hi": 5000
+            },
+            "daylight":
+            {
+                "lo": 5500,
+                "hi": 6500
+            },
+            "cloudy":
+            {
+                "lo": 7000,
+                "hi": 8000
+            }
+        },
+        "sensitivity_r": 1.0,
+        "sensitivity_b": 1.0,
+        "enable_nn": 1
     },
     "rpi.agc":
     {
@@ -877,5 +923,8 @@
                 65535, 65535
             ]
         }
+    },
+    "rpi.sync":
+    {
     }
 }

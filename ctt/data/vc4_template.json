@@ -227,5 +227,8 @@
         "threshold": 0.75,
         "limit": 0.5,
         "strength": 1.0
+    },
+    "rpi.sync":
+    {
     }
 }

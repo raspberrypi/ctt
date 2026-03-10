@@ -245,6 +245,18 @@ def run_ctt(
                 if result is not None:
                     cam.json[algo.json_key].update(result)
 
+        # PiSP-only: populate rpi.nn.awb with AWB curve and CCM at 5000 K
+        if platform.target == 'pisp' and 'rpi.nn.awb' in cam.json:
+            if 'rpi.awb' not in cam.disable and 'rpi.awb' in cam.json:
+                awb_data = cam.json['rpi.awb']
+                for key in ('ct_curve', 'transverse_pos', 'transverse_neg'):
+                    if key in awb_data:
+                        cam.json['rpi.nn.awb'][key] = awb_data[key]
+            if 'rpi.ccm' not in cam.disable and 'rpi.ccm' in cam.json:
+                ccms = cam.json['rpi.ccm'].get('ccms')
+                if ccms:
+                    cam.json['rpi.nn.awb']['ccm'] = _interpolate_ccm(ccms, 5000)
+
         print('', flush=True)
         cam.write_json(target=target, grid_size=grid_size)
         cam.write_log(log_output)
@@ -264,6 +276,21 @@ def run_ctt(
         print('\n' + '\n'.join(lines), flush=True)
     else:
         cam.write_log(log_output)
+
+
+def _interpolate_ccm(ccms: list[dict], target_ct: int) -> list[float]:
+    """Return a CCM (9-element list) interpolated from ccms at target_ct. Clamps at endpoints."""
+    cts = [e['ct'] for e in ccms]
+    mats = [e['ccm'] for e in ccms]
+    if target_ct <= cts[0]:
+        return mats[0]
+    if target_ct >= cts[-1]:
+        return mats[-1]
+    for i in range(len(cts) - 1):
+        if cts[i] <= target_ct <= cts[i + 1]:
+            t = (target_ct - cts[i]) / (cts[i + 1] - cts[i])
+            return [round(a + t * (b - a), 5) for a, b in zip(mats[i], mats[i + 1])]
+    return mats[-1]
 
 
 def main() -> None:
