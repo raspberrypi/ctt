@@ -4,15 +4,19 @@ Camera Tuning Tool for generating JSON tuning files for Raspberry Pi cameras.
 Takes DNG calibration images and produces tuning parameters for the PiSP or VC4
 ISP platforms.
 
-## Dependencies
+## Installation
 
-Requires Python 3.11+. Install the package and its dependencies with:
+Requires Python 3.11+.
+
+```bash
+pip install rpi-ctt
+```
+
+For development, install in editable mode from the repository:
 
 ```bash
 pip install -e .
 ```
-
-This installs ctt in editable mode with all required packages (see `pyproject.toml`).
 
 ## Usage
 
@@ -197,12 +201,6 @@ ctt/
 ```
 
 ## Development
-
-### Install in editable mode
-
-```bash
-pip install -e .
-```
 
 ### Linting and formatting
 
