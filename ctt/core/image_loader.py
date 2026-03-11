@@ -10,8 +10,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import exifread
 import numpy as np
-import pyexiv2 as pyexif
 import rawpy as raw
 
 from ..detection.macbeth import find_macbeth
@@ -27,31 +27,34 @@ def dng_load_image(cam: Camera, im_str: str) -> Image:
     try:
         img = Image()
 
-        metadata = pyexif.ImageMetadata(im_str)
-        metadata.read()
+        with open(im_str, 'rb') as f:
+            tags = exifread.process_file(f, details=True)
 
         img.ver = 100
-        try:
-            img.w = metadata['Exif.SubImage1.ImageWidth'].value
-            subimage = 'SubImage1'
-            photo = 'Photo'
-        except KeyError:
-            img.w = metadata['Exif.Image.ImageWidth'].value
-            subimage = 'Image'
-            photo = 'Image'
+
+        def _tag(name):
+            """Look up a tag in EXIF SubIFD0 first, then fall back to Image IFD."""
+            for prefix in ('EXIF SubIFD0', 'Image'):
+                key = f'{prefix} {name}'
+                if key in tags:
+                    return tags[key]
+            raise KeyError(name)
+
+        img.w = _tag('ImageWidth').values[0]
         img.pad = 0
-        img.h = metadata[f'Exif.{subimage}.ImageLength'].value
+        img.h = _tag('ImageLength').values[0]
         try:
-            white = metadata[f'Exif.{subimage}.WhiteLevel'].value
-        except (KeyError, AttributeError):
+            white = tags['EXIF SubIFD0 Tag 0xC61D'].values[0]
+        except KeyError:
             white = (1 << 16) - 1  # mono DNGs may omit WhiteLevel
         img.sigbits = int(white).bit_length()
         img.fmt = (img.sigbits - 4) // 2
-        img.exposure = int(metadata[f'Exif.{photo}.ExposureTime'].value * 1000000)
-        img.againQ8 = metadata[f'Exif.{photo}.ISOSpeedRatings'].value * 256 / 100
+        exp = tags['EXIF ExposureTime'].values[0]
+        img.exposure = int(exp.num / exp.den * 1_000_000)
+        img.againQ8 = tags['EXIF ISOSpeedRatings'].values[0] * 256 / 100
         img.againQ8_norm = img.againQ8 / 256
-        img.cam_name = metadata['Exif.Image.Model'].value
-        blacks = metadata[f'Exif.{subimage}.BlackLevel'].value
+        img.cam_name = str(tags['Image Model']).strip()
+        blacks = _tag('BlackLevel').values
         try:
             img.blacklevel = int(blacks[0])
         except TypeError:
@@ -64,7 +67,8 @@ def dng_load_image(cam: Camera, im_str: str) -> Image:
             '1 0 2 1': (3, (1, 0, 3, 2)),
         }
         try:
-            cfa_pattern = metadata[f'Exif.{subimage}.CFAPattern'].value
+            cfa_values = _tag('CFAPattern').values
+            cfa_pattern = ' '.join(str(x) for x in cfa_values)
             img.pattern = bayer_case[cfa_pattern][0]
             img.order = bayer_case[cfa_pattern][1]
         except (KeyError, AttributeError):
