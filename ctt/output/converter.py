@@ -9,6 +9,7 @@
 import json
 
 import numpy as np
+from scipy.ndimage import zoom
 
 from ..platforms import pisp as pisp_mod
 from ..platforms import vc4 as vc4_mod
@@ -22,12 +23,7 @@ def _load_template(platform_mod: object) -> dict:
 
 
 def interp_2d(in_ls: np.ndarray, src_w: int, src_h: int, dst_w: int, dst_h: int) -> np.ndarray:
-    out_ls = np.zeros((dst_h, dst_w))
-    for i in range(src_h):
-        out_ls[i] = np.interp(np.linspace(0, dst_w - 1, dst_w), np.linspace(0, dst_w - 1, src_w), in_ls[i])
-    for i in range(dst_w):
-        out_ls[:, i] = np.interp(np.linspace(0, dst_h - 1, dst_h), np.linspace(0, dst_h - 1, src_h), out_ls[:src_h, i])
-    return out_ls
+    return zoom(in_ls, (dst_h / src_h, dst_w / src_w), order=1)
 
 
 def convert_target(in_json: dict, target: str) -> dict:
