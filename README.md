@@ -220,6 +220,15 @@ python3 -m ruff format .
 python3 -m ruff format --check .
 ```
 
+### Running tests
+
+Install with the test extra and run pytest:
+
+```bash
+pip install -e ".[test]"
+pytest -v
+```
+
 ### Building a wheel package
 
 ```bash
