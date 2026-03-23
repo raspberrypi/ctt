@@ -22,6 +22,9 @@ dependencies = [
     "scipy>=1.17",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
 [project.scripts]
 ctt = "ctt.ctt:main"
 
@@ -30,6 +33,9 @@ include = ["ctt*"]
 
 [tool.setuptools.package-data]
 "ctt.data" = ["*.pgm", "*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.ruff]
 target-version = "py311"
