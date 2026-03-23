@@ -67,6 +67,20 @@ class AwbCalibration(CalibrationAlgorithm):
         awb_out = awb(cam, colour_cals, grid_size, plot=do_plot)
         ct_curve, transverse_neg, transverse_pos = awb_out
 
+        # Clip AWB mode bounds to the measured CT range.
+        ct_min = ct_curve[0]  # ct_curve is [ct, r, b, ct, r, b, ...] increasing CT
+        ct_max = ct_curve[-3]
+        modes = cam.json.get('rpi.awb', {}).get('modes', {})
+        for name, mode in modes.items():
+            lo = max(mode['lo'], ct_min)
+            hi = min(mode['hi'], ct_max)
+            if lo > hi:
+                lo = hi = ct_min if mode['hi'] < ct_min else ct_max
+            if lo != mode['lo'] or hi != mode['hi']:
+                cam.log += f'\nAWB mode {name}: clipped [{mode["lo"]}, {mode["hi"]}] -> [{lo}, {hi}]'
+                mode['lo'] = lo
+                mode['hi'] = hi
+
         result['ct_curve'] = ct_curve
         result['sensitivity_r'] = 1.0
         result['sensitivity_b'] = 1.0
