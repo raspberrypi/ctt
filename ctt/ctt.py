@@ -289,7 +289,7 @@ def _interpolate_ccm(ccms: list[dict], target_ct: int) -> list[float]:
     for i in range(len(cts) - 1):
         if cts[i] <= target_ct <= cts[i + 1]:
             t = (target_ct - cts[i]) / (cts[i + 1] - cts[i])
-            return [round(a + t * (b - a), 5) for a, b in zip(mats[i], mats[i + 1])]
+            return [round(a + t * (b - a), 5) for a, b in zip(mats[i], mats[i + 1], strict=True)]
     return mats[-1]
 
 
