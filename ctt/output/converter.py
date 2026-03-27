@@ -80,18 +80,24 @@ def convert_v2(in_json: dict, target: str) -> str:
     grid_size_pisp = pisp_mod.get_config().grid_size
     grid_size_vc4 = vc4_mod.get_config().grid_size
 
+    # 'bcm2835' is the tuning file name for the vc4 platform; normalise for internal use
+    is_vc4 = target in ('vc4', 'bcm2835')
+    file_target = 'bcm2835' if is_vc4 else target
+    internal_target = 'vc4' if is_vc4 else target
+
     if 'version' in in_json and in_json['version'] == 1.0:
         converted = {
             'version': 2.0,
-            'target': target,
+            'target': file_target,
             'algorithms': [{algo: config} for algo, config in in_json.items()],
         }
     else:
         converted = in_json
 
-    if converted['target'] != target:
-        converted = convert_target(converted, target)
-        converted['target'] = target
+    current_is_vc4 = converted['target'] in ('vc4', 'bcm2835')
+    if current_is_vc4 != is_vc4:
+        converted = convert_target(converted, internal_target)
+        converted['target'] = file_target
 
-    grid_size = grid_size_vc4[0] if target == 'vc4' else grid_size_pisp[0]
+    grid_size = grid_size_vc4[0] if is_vc4 else grid_size_pisp[0]
     return pretty_print(converted, custom_elems={'table': grid_size, 'luminance_lut': grid_size})
