@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: BSD-2-Clause / Copyright (C) 2026, Raspberry Pi -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ctt-server{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='7' fill='%23d6336c'/></svg>">
+</head>
+<body>
+  <header class="topbar">
+    <a href="{{ url_for('index') }}" class="brand" style="text-decoration:none">
+      <span class="dot"></span> ctt&#8209;server <small>· camera tuning</small>
+    </a>
+    <nav>
+      <a href="{{ url_for('projects') }}" class="{{ 'active' if active=='projects' }}">Projects</a>
+    </nav>
+    <span class="spacer"></span>
+    {% block topbar_status %}{% endblock %}
+  </header>
+  <main class="container">
+    {% block body %}{% endblock %}
+  </main>
+  <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

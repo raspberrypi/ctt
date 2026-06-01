@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Run · {{ project.name }}{% endblock %}
+{% block body %}
+<div class="page-head spread">
+  <div>
+    <h1>Run CTT — {{ project.name }}</h1>
+    <div class="sub">{{ counts.macbeth }} Macbeth · {{ counts.alsc }} ALSC · {{ counts.cac }} CAC images</div>
+  </div>
+  <div class="btn-row">
+    <a class="btn ghost" href="{{ url_for('project', name=project.name) }}">&larr; Capture</a>
+    <a class="btn" href="{{ url_for('results_page', name=project.name) }}">Results &rarr;</a>
+  </div>
+</div>
+
+<div class="grid" x-data='runApp({ project: {{ project.name|tojson }} })'>
+  <div class="card">
+    <div class="card-head"><h2>Options</h2></div>
+
+    <div class="field">
+      <label>Target platform</label>
+      <div class="seg">
+        <button type="button" :class="{active: targets==='pisp,vc4'}" @click="targets='pisp,vc4'">Both</button>
+        <button type="button" :class="{active: targets==='pisp'}" @click="targets='pisp'">PiSP</button>
+        <button type="button" :class="{active: targets==='vc4'}" @click="targets='vc4'">VC4</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Mode</label>
+      <div class="seg">
+        <button type="button" :class="{active: mode==='full'}" @click="mode='full'">Full</button>
+        <button type="button" :class="{active: mode==='alsc-only'}" @click="mode='alsc-only'">ALSC only</button>
+        <button type="button" :class="{active: mode==='colour-only'}" @click="mode='colour-only'">Colour only</button>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <label class="flex" style="margin-bottom:12px;font-weight:600">
+      <input type="checkbox" style="width:auto" x-model="greyworld"> Grey-world AWB (instead of Macbeth-based)
+    </label>
+    <label class="flex" style="margin-bottom:12px;font-weight:600">
+      <input type="checkbox" style="width:auto" x-model="doAlscColour"> ALSC colour shading
+    </label>
+
+    <div class="field-row">
+      <div class="field">
+        <label>ALSC luminance strength</label>
+        <input type="number" x-model.number="luminanceStrength" min="0" max="1" step="0.05">
+      </div>
+      <div class="field">
+        <label>ALSC max gain</label>
+        <input type="number" x-model.number="maxGain" min="1" max="16" step="0.5">
+      </div>
+      <div class="field">
+        <label>Black level (-1 auto)</label>
+        <input type="number" x-model.number="blacklevel" min="-1" max="65535" step="1">
+      </div>
+    </div>
+
+    <div class="btn-row mt">
+      <button class="btn primary" :disabled="running" @click="start()">
+        <span x-text="running ? 'Running…' : '▶ Run calibration'"></span>
+      </button>
+      <button class="btn ghost" x-show="done" @click="window.location='{{ url_for('results_page', name=project.name) }}'">View results &rarr;</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h2>Console</h2>
+      <span class="chip" x-show="exitCode!==null" :class="exitCode===0 ? 'cac' : ''"
+            x-text="exitCode===0 ? 'completed' : 'exit '+exitCode" x-cloak></span>
+    </div>
+    <div class="console" id="console" x-ref="console"></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/alpine.min.js') }}" defer></script>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% set active = 'projects' %}
+{% block title %}Projects · ctt-server{% endblock %}
+{% block body %}
+<div class="page-head spread">
+  <div>
+    <h1>Projects</h1>
+    <div class="sub">Each project is a capture session for one sensor. Workspace: <code>{{ workspace_root }}</code></div>
+  </div>
+</div>
+
+{% if error %}<div class="banner error">{{ error }}</div>{% endif %}
+
+<div class="grid cols-2">
+  <div class="card">
+    <div class="card-head"><h2>Your projects</h2></div>
+    {% if projects %}
+      <table>
+        <thead><tr><th>Name</th><th>Macbeth</th><th>ALSC</th><th>CAC</th><th>Created</th><th></th></tr></thead>
+        <tbody>
+        {% for p in projects %}
+          {% set c = p.counts() %}
+          <tr>
+            <td class="mono"><a href="{{ url_for('project', name=p.name) }}">{{ p.name }}</a></td>
+            <td>{{ c.macbeth }}</td><td>{{ c.alsc }}</td><td>{{ c.cac }}</td>
+            <td class="muted">{{ p.created_at[:10] }}</td>
+            <td>
+              <form method="post" action="{{ url_for('delete_project', name=p.name) }}"
+                    onsubmit="return confirm('Delete project {{ p.name }} and all its images?')" style="margin:0">
+                <button class="btn sm danger">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty"><div class="big">📷</div>No projects yet. Create one to start capturing.</div>
+    {% endif %}
+  </div>
+
+  <div class="grid" style="align-content:start">
+    <div class="card">
+      <div class="card-head"><h2>New project</h2></div>
+      <form method="post" action="{{ url_for('create_project') }}">
+        <div class="field">
+          <label for="name">Sensor / project name</label>
+          <input type="text" id="name" name="name" placeholder="<imx477>" required>
+          <div class="hint">Used as the output filename base (e.g. <code>imx477.json</code>).
+            Pre-filled from the connected camera when available.</div>
+        </div>
+        <button class="btn primary" type="submit">Create project</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  // Seed the new-project name with the connected camera's sensor name.
+  fetch('/api/health').then((r) => r.json()).then((h) => {
+    const el = document.getElementById('name');
+    if (el && !el.value && h && h.camera && h.model) el.value = h.model;
+  }).catch(() => {});
+</script>
+{% endblock %}

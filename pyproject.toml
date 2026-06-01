@@ -24,17 +24,24 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
+# ctt-server web frontend (web UI + in-process capture + CTT). Lives in apps/ctt-server.
+# Runs on the Raspberry Pi; picamera2 is a system package (ships with Pi OS), imported
+# lazily, so it is intentionally not a pip dependency here.
+server = ["flask>=3.0"]
 
 [project.scripts]
 ctt = "ctt.ctt:main"
+# ctt-server web UI (Flask). See README.md.
+ctt-server = "ctt_server.__main__:main"
 
 [tool.setuptools.packages.find]
-# The core ctt package lives under apps/ctt.
-where = ["apps/ctt"]
-include = ["ctt*"]
+# Discover the ctt CLI under apps/ctt and the web app under apps/ctt-server.
+where = ["apps/ctt", "apps/ctt-server"]
+include = ["ctt*", "ctt_server*"]
 
 [tool.setuptools.package-data]
 "ctt.data" = ["*.pgm", "*.json"]
+"ctt_server" = ["templates/*.html", "static/*", "static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
