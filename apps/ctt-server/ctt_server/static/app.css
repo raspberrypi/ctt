@@ -242,6 +242,21 @@ td.mono { font-family: var(--mono); }
 .muted { color: var(--text-dim); }
 .spread { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .flex { display: flex; align-items: center; gap: 10px; }
+
+/* Number input without the up/down spinner buttons. */
+.nospin::-webkit-outer-spin-button, .nospin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.nospin { -moz-appearance: textfield; appearance: textfield; }
+
+/* Lightbox intensity slider: the track fill spans the full width up to --fill
+   (0–100%), so it reaches both ends — full at 100%, empty at 0%. */
+.lb-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 16px; margin: 0; background: transparent; cursor: pointer; }
+.lb-slider::-webkit-slider-runnable-track { height: 6px; border-radius: 999px;
+  background: linear-gradient(to right, var(--accent) 0 var(--fill, 0%), var(--border) var(--fill, 0%) 100%); }
+.lb-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; margin-top: -5px;
+  width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+.lb-slider::-moz-range-track { height: 6px; border-radius: 999px; background: var(--border); }
+.lb-slider::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--accent); }
+.lb-slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; }
 .wrap { flex-wrap: wrap; }
 .mt { margin-top: 16px; }
 .divider { height: 1px; background: var(--border); margin: 18px 0; }

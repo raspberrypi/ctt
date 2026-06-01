@@ -96,6 +96,37 @@
     </div>
   </div>
 
+  <!-- Full width: lightbox (shown only when a device is present) -->
+  <div class="card mt" x-show="lightbox.present" x-cloak>
+    <div class="card-head">
+      <h2>Lightbox</h2>
+      <span class="chip" x-text="lightbox.model + (lightbox.serial ? ' · ' + lightbox.serial : '')"></span>
+    </div>
+    <div class="field-row" style="align-items:flex-end; flex-wrap:wrap">
+      <div class="field" style="flex:0 0 240px; margin:0">
+        <label>Illuminant</label>
+        <select x-model.number="lightbox.channel" @change="setIlluminant()">
+          <template x-for="[ch, name] in Object.entries(lightbox.illuminants)" :key="ch">
+            <option :value="Number(ch)" x-text="ch + ' — ' + name"></option>
+          </template>
+        </select>
+      </div>
+      <div class="field" style="flex:1 1 260px; margin:0">
+        <label>Intensity</label>
+        <div class="flex" style="gap:10px; align-items:center; margin:0">
+          <input type="range" min="0" max="100" step="1" class="lb-slider" x-model.number="lightbox.intensity"
+                 @change="applyLightbox()" :style="{ '--fill': (lightbox.intensity || 0) + '%', flex: '1' }">
+          <input type="number" min="0" max="100" step="1" class="nospin" x-model.number="lightbox.intensity"
+                 @change="applyLightbox()" style="width:72px; flex:0 0 auto">
+          <span class="muted">%</span>
+        </div>
+      </div>
+      <div class="field" style="flex:0 0 auto; margin:0">
+        <button type="button" class="btn ghost" @click="lightboxOff()">Off</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Full width: tag & capture -->
   <div class="card mt">
     <div class="card-head"><h2>Tag &amp; capture</h2></div>

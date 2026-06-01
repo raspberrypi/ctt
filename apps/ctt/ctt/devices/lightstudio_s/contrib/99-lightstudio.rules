@@ -1,0 +1,9 @@
+# Image Engineering lightSTUDIO-S — allow non-root USB access via libusb/pyusb.
+#
+# Install:
+#   sudo cp 99-lightstudio.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload && sudo udevadm trigger
+#
+# 0x20a0 is a shared vendor id, so match the product id too. TAG+=uaccess grants the
+# logged-in user access; GROUP=plugdev MODE=0660 covers headless/service use.
+SUBSYSTEM=="usb", ATTR{idVendor}=="20a0", ATTR{idProduct}=="412d", MODE="0660", GROUP="plugdev", TAG+="uaccess"
