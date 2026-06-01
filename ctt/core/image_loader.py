@@ -33,8 +33,13 @@ def dng_load_image(cam: Camera, im_str: str) -> Image:
         img.ver = 100
 
         def _tag(name):
-            """Look up a tag in EXIF SubIFD0 first, then fall back to Image IFD."""
-            for prefix in ('EXIF SubIFD0', 'Image'):
+            """Look up a tag across the DNG's IFDs, tolerating layout differences.
+
+            Raspberry Pi DNGs vary by writer: rpicam/libcamera put geometry in
+            'EXIF SubIFD0' and ExposureTime/ISO in the 'EXIF' IFD, whereas PiDNG
+            (Picamera2) puts them in the main 'Image' IFD. Check all three.
+            """
+            for prefix in ('EXIF SubIFD0', 'Image', 'EXIF'):
                 key = f'{prefix} {name}'
                 if key in tags:
                     return tags[key]
@@ -49,9 +54,9 @@ def dng_load_image(cam: Camera, im_str: str) -> Image:
             white = (1 << 16) - 1  # mono DNGs may omit WhiteLevel
         img.sigbits = int(white).bit_length()
         img.fmt = (img.sigbits - 4) // 2
-        exp = tags['EXIF ExposureTime'].values[0]
+        exp = _tag('ExposureTime').values[0]
         img.exposure = int(exp.num / exp.den * 1_000_000)
-        img.againQ8 = tags['EXIF ISOSpeedRatings'].values[0] * 256 / 100
+        img.againQ8 = _tag('ISOSpeedRatings').values[0] * 256 / 100
         img.againQ8_norm = img.againQ8 / 256
         img.cam_name = str(tags['Image Model']).strip()
         blacks = _tag('BlackLevel').values
