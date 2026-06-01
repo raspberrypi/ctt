@@ -6,16 +6,12 @@
 
 import logging
 import re
-import sys
 import time
 from pathlib import Path
 
 from ..output.json_formatter import pretty_print
 from ..utils.tools import get_photos
 from .image_loader import load_image
-
-_RED = '\033[31m' if sys.stdout.isatty() else ''
-_RESET = '\033[0m' if sys.stdout.isatty() else ''
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +131,7 @@ class Camera:
                     self.imgs_alsc.append(img)
                     if blacklevel != -1:
                         img.blacklevel_16 = blacklevel
-                    print(f'\t{filename}', flush=True)
+                    logger.info(f'\t{filename}')
                     continue
                 else:
                     logger.error('Error! No colour temperature found!')
@@ -150,23 +146,20 @@ class Camera:
                 self.imgs_cac.append(img)
                 if blacklevel != -1:
                     img.blacklevel_16 = blacklevel
-                print(f'\t{filename}', flush=True)
+                logger.info(f'\t{filename}')
                 continue
             else:
                 self.log += '\nIdentified as macbeth chart image'
                 if col is None or lux is None:
-                    print(f'\t{filename}', flush=True)
-                    print(
-                        f'\t\t{_RED}✗ Colour temp/lux not found in filename (expected e.g. 5000k_800l.dng){_RESET}',
-                        flush=True,
-                    )
+                    logger.info(f'\t{filename}')
+                    logger.error('\t\t✗ Colour temp/lux not found in filename (expected e.g. 5000k_800l.dng)')
                     self.log += '\nWARNING: Error reading colour temp/lux from filename'
                     self.log += '\nImage discarded!'
                     continue
                 img = load_image(self, address, mac_config)
                 if img is None:
-                    print(f'\t{filename}', flush=True)
-                    print(f'\t\t{_RED}✗ Macbeth chart not found in image{_RESET}', flush=True)
+                    logger.info(f'\t{filename}')
+                    logger.error('\t\t✗ Macbeth chart not found in image')
                     self.log += '\nImage discarded!'
                     continue
                 img.col, img.lux = col, lux
@@ -175,9 +168,9 @@ class Camera:
                 self.log += f'\nLux value: {lux} lx'
                 if blacklevel != -1:
                     img.blacklevel_16 = blacklevel
-                print(f'\t{filename}', flush=True)
+                logger.info(f'\t{filename}')
                 if getattr(img, 'macbeth_confidence', None) is not None:
-                    print(f'\t\t✓ Macbeth found (confidence {img.macbeth_confidence:.3f})', flush=True)
+                    logger.info(f'\t\t✓ Macbeth found (confidence {img.macbeth_confidence:.3f})')
                 self.imgs.append(img)
 
     def check_imgs(self, macbeth: bool = True) -> bool:
