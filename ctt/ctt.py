@@ -32,8 +32,6 @@ logger = logging.getLogger(__name__)
 # Optional ANSI styling (disabled when not a TTY)
 _USE_COLOR = sys.stdout.isatty()
 _RESET = '\033[0m' if _USE_COLOR else ''
-_DIM = '\033[2m' if _USE_COLOR else ''
-_GREEN = '\033[32m' if _USE_COLOR else ''
 _YELLOW = '\033[33m' if _USE_COLOR else ''
 _RED = '\033[31m' if _USE_COLOR else ''
 _CYAN = '\033[36m' if _USE_COLOR else ''
@@ -170,19 +168,19 @@ def run_ctt(
     disable_str = ', '.join(sorted(disable)) if disable else '(none)'
     plot_str = ', '.join(plot) if plot else '(none)'
     summary_lines = [
-        f'{_CYAN}Run{_RESET}',
+        'Run',
         f'  Input   {directory}',
         f'  Output  {json_output}',
         f'  Config  {config_src}   Target  {target}   Mode  {mode}',
         '',
-        f'{_CYAN}Options{_RESET}',
+        'Options',
         f'  ALSC    do_alsc_colour={do_alsc_colour}  luminance_strength={luminance_strength}  max_gain={lsc_max_gain}',
         f'  AWB     greyworld={greyworld}   Blacklevel  {blacklevel}   Macbeth  small={mac_small}  show={mac_show}',
         f'  CCM     matrix_selection={ccm_matrix_selection}  test_patches={ccm_test_patches}',
         f'  Disable {disable_str}',
         f'  Plot    {plot_str}',
     ]
-    print('\n' + '\n'.join(summary_lines) + '\n', flush=True)
+    logger.info('\n' + '\n'.join(summary_lines) + '\n')
 
     try:
         cam = Camera(json_output, json=json_template)
@@ -217,7 +215,7 @@ def run_ctt(
         # other algorithm sections unchanged; only skip removing them from the output.
         if not (output_json_path and (alsc_only or colour_only)):
             cam.json_remove(disable)
-        print(f'\n{_CYAN}Starting calibrations{_RESET}', flush=True)
+        logger.info('\nStarting calibrations')
         algorithms = [
             AlscCalibration(cam, platform, luminance_strength, do_alsc_colour, lsc_max_gain),
             GeqCalibration(cam, platform),
@@ -240,7 +238,7 @@ def run_ctt(
 
         for algo in algorithms:
             if algo.json_key not in cam.disable:
-                print(f'\t{algo.json_key.replace("rpi.", "").upper()}', flush=True)
+                logger.info(f'\t{algo.json_key.replace("rpi.", "").upper()}')
                 result = algo.run()
                 if result is not None:
                     cam.json[algo.json_key].update(result)
@@ -257,7 +255,7 @@ def run_ctt(
                 if ccms:
                     cam.json['rpi.nn.awb']['ccm'] = _interpolate_ccm(ccms, 5000)
 
-        print('', flush=True)
+        logger.info('')
         cam.write_json(target=target, grid_size=grid_size)
         cam.write_log(log_output)
         # Final summary
@@ -267,13 +265,13 @@ def run_ctt(
         n_cac = len(cam.imgs_cac)
         counts = f'Macbeth: {n_macbeth}  ALSC: {n_alsc}  CAC: {n_cac}'
         lines = [
-            f'{_GREEN}Calibration complete{_RESET}',
-            f'  Output  {_CYAN}{json_output}{_RESET}',
-            f'  Log     {_DIM}{log_output}{_RESET}',
+            'Calibration complete',
+            f'  Output  {json_output}',
+            f'  Log     {log_output}',
             f'  Target  {target}  ·  Mode  {mode}',
             f'  Images  {counts}',
         ]
-        print('\n' + '\n'.join(lines), flush=True)
+        logger.info('\n' + '\n'.join(lines))
     else:
         cam.write_log(log_output)
 
@@ -294,7 +292,7 @@ def _interpolate_ccm(ccms: list[dict], target_ct: int) -> list[float]:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format='%(message)s')
+    logging.basicConfig(level=logging.INFO, format='%(message)s', stream=sys.stdout)
     for h in logging.root.handlers:
         h.setFormatter(_ConsoleFormatter())
 
