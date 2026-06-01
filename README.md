@@ -104,7 +104,7 @@ python3 -m ctt --prettify [-t pisp|vc4] <input.json> [output.json]
 ## Configuration file
 
 An optional JSON config file controls calibration behaviour. See
-`ctt/data/config_example.json` for the full set of options:
+`apps/ctt/ctt/data/config_example.json` for the full set of options:
 
 ```json
 {
