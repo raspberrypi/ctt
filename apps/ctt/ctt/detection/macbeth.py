@@ -28,6 +28,40 @@ logger = logging.getLogger(__name__)
 success_msg = 'Macbeth chart located successfully'
 
 
+class _NullLog:
+    """No-op log accumulator so the detector can run without a Camera (live finder)."""
+
+    def __iadd__(self, _other: str) -> _NullLog:
+        return self
+
+
+class _NullCam:
+    log = _NullLog()
+
+
+def locate_chart(img: np.ndarray, mac_config: tuple[int, int] = (0, 0)) -> tuple | None:
+    """Locate a Macbeth chart for live preview using the full find_macbeth detector.
+
+    Runs find_macbeth (brightness retries + multi-scale search — the single-scale core
+    is not robust enough on partially-framed charts) without a Camera, and with this
+    module's per-frame failure/low-confidence logging silenced so polling doesn't spam.
+    Accepts a single-channel float (0-1) or a 3-channel uint8 BGR frame. Returns
+    (corners (4,2), centres (24,2), confidence: float) in img pixel space, or None.
+    """
+    prev = logger.level
+    logger.setLevel(logging.WARNING)
+    try:
+        result = find_macbeth(_NullCam(), img, mac_config)
+    finally:
+        logger.setLevel(prev)
+    if result is None:
+        return None
+    coords_fit, conf = result
+    if coords_fit is None or conf is None:
+        return None
+    return coords_fit[0][0], coords_fit[1][0], float(conf)
+
+
 def find_macbeth(cam: Camera, img: np.ndarray, mac_config: tuple[int, int] = (0, 0)) -> tuple | None:
     small_chart, show = mac_config
     cam.log += '\nLocating macbeth chart'

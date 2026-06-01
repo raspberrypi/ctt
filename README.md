@@ -157,48 +157,44 @@ If a file is skipped (e.g. missing colour temp/lux in the filename, or Macbeth c
 | Lux | `rpi.lux` | Lux level calibration |
 | GEQ | `rpi.geq` | Green equalisation threshold |
 
-## Package structure
+## Web frontend (ctt-server)
 
+`ctt-server` is an optional web UI for capturing, tagging and tuning calibration
+images, served from the Raspberry Pi. It runs as a single process on the Pi: the
+server previews and captures DNGs in-process with Picamera2, files them with
+CTT-correct filenames, runs the tuner in-process, and serves downloadable tuning
+files with result visualisations. The client is just a web browser on any machine
+on the network.
+
+### Install and run (on the Pi)
+
+```bash
+pip install "rpi-ctt[server]"    # from PyPI
+# or, from a local checkout:
+pip install -e ".[server]"
+ctt-server                       # HTTPS on 0.0.0.0:5000
 ```
-ctt/
-    __main__.py          Entry point (python -m ctt)
-    ctt.py               CLI + orchestration
-    core/
-        camera.py        Camera data holder + image management
-        image.py         Image dataclass
-        image_loader.py  DNG image loading
-    algorithms/
-        base.py          CalibrationAlgorithm ABC
-        alsc.py          Lens shading correction
-        awb.py           Auto white balance
-        ccm.py           Colour correction matrices
-        cac.py           Chromatic aberration correction
-        noise.py         Noise profiling
-        lux.py           Lux calibration
-        geq.py           Green equalisation
-    detection/
-        macbeth.py       Macbeth chart locator
-        ransac.py        RANSAC geometry helpers
-        dots.py          CAC dot detection
-        patches.py       ALSC patch extraction
-    platforms/
-        base.py          PlatformConfig class
-        pisp.py          PiSP configuration
-        vc4.py           VC4 configuration
-    output/
-        json_formatter.py  JSON pretty-printer
-        converter.py       VC4 <-> PiSP conversion
-    utils/
-        tools.py         Shared utilities
-        colorspace.py    RGB to LAB conversion
-        config.py        Config file parser
-        errors.py        Error classes
-    data/
-        ctt_ref.pgm      Reference Macbeth chart image
-        pisp_template.json  Default PiSP tuning template
-        vc4_template.json   Default VC4 tuning template
-        config_example.json Example configuration file
-```
+
+`ctt-server` is **HTTPS-only**; on first run it generates a self-signed
+certificate under `<workspace>/.tls` (pass `--cert`/`--key` to use your own, or
+`--port` to change the port). Browse to `https://<pi-hostname>:5000` and accept
+the one-time self-signed warning. Picamera2 ships with Raspberry Pi OS and is
+imported lazily; if you use a virtualenv, create it with `--system-site-packages`
+(or `apt install python3-picamera2`) so picamera2 is visible.
+
+### Workflow
+
+1. **Project** — create one per sensor (e.g. `imx708_wide`); the name becomes the
+   output filename base (`imx708_wide_pisp.json`).
+2. **Capture** — frame with the live preview and histogram, set exposure/gain (or
+   leave on auto), and capture. In Macbeth mode a live finder overlays the detected
+   chart and flags low confidence or a too-small chart. Each shot is filed with a
+   CTT-correct filename.
+3. **Run** — pick targets (PiSP/VC4/both) and mode (full / ALSC-only / colour-only);
+   CTT progress streams live in the console.
+4. **Results** — download the tuning `.json`/`.log` or the whole project as a zip,
+   and inspect the AWB curve, per-CT CCM matrices, ALSC shading heatmap and
+   lux/noise references parsed from the output JSON.
 
 ## Development
 

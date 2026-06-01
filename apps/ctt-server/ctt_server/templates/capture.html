@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} · ctt-server{% endblock %}
+{% block body %}
+<div class="page-head spread">
+  <div>
+    <h1>{{ project.name }}</h1>
+    <div class="sub">Capture &amp; tag calibration images</div>
+  </div>
+  <div class="btn-row">
+    <a class="btn" href="{{ url_for('run_page', name=project.name) }}">Run CTT &rarr;</a>
+    <a class="btn ghost" href="{{ url_for('results_page', name=project.name) }}">Results</a>
+  </div>
+</div>
+
+<div x-data='captureApp({
+        project: {{ project.name|tojson }},
+        captures: {{ captures|tojson }}
+     })'>
+
+  <div class="banner info" x-show="connected===false" x-cloak>
+    No camera detected on the server — capture is disabled. Connect a camera to the Pi, or
+    <a href="{{ url_for('run_page', name=project.name) }}">run CTT</a> on existing images.
+  </div>
+
+  <!-- Top row: preview (2/3) + details (1/3) -->
+  <div class="grid" style="grid-template-columns: 2fr 1fr; gap: 20px; align-items: start">
+    <!-- Left: preview + sensor details (fills the space under the viewfinder) -->
+    <div class="grid" style="align-content:start">
+      <div class="card tight">
+        <div class="preview-wrap" :class="{ louping: loupe.active }" @dragstart.prevent
+             @pointerdown="loupeStart($event)" @pointermove="loupeMove($event)"
+             @pointerup="loupeEnd($event)" @pointerleave="loupeEnd($event)" @pointercancel="loupeEnd($event)">
+          <img id="previewImg" draggable="false" x-show="connected" :src="connected ? '{{ url_for('api_preview') }}' : ''" alt="camera preview">
+          <canvas id="macbethOverlay" class="overlay" x-show="connected" x-cloak></canvas>
+          <div id="loupeMarker" class="loupe-marker" x-show="loupe.active" x-cloak></div>
+          <canvas id="loupeCanvas" class="loupe" width="220" height="220" x-show="loupe.active" x-cloak></canvas>
+          <div class="mac-chip" :class="macbethState()"
+               x-show="connected && form.image_type==='macbeth'" x-cloak>
+            <span x-text="{ok: '✓', warn: '!', bad: '✗'}[macbethState()]"></span> Macbeth
+            <span x-show="macbeth.found" x-text="macbeth.confidence"></span>
+            <span x-show="macbeth.small">· too small</span>
+            <span x-show="macbeth.saturated">· clipping</span>
+          </div>
+          <div class="placeholder" x-show="!connected" x-cloak>Live preview appears here when a camera is available on the server.</div>
+        </div>
+      </div>
+      <div class="caminfo" x-show="connected" x-cloak>
+        <div class="caminfo-row" style="grid-template-columns: repeat(2, 1fr)">
+          <div><span class="k">Sensor</span><span class="v" x-text="camera.model || '—'"></span></div>
+          <div><span class="k">Resolution</span><span class="v" x-text="camera.resolution ? camera.resolution[0] + ' × ' + camera.resolution[1] : '—'"></span></div>
+        </div>
+        <div class="caminfo-row" style="grid-template-columns: repeat(4, 1fr)">
+          <div><span class="k">Exposure</span><span class="v" x-text="(metered.exposure/1000).toFixed(1) + ' ms'"></span></div>
+          <div><span class="k">Gain</span><span class="v" x-text="metered.gain + '×'"></span></div>
+          <div><span class="k">Colour temp</span><span class="v" x-text="metered.colour_temp + ' K'"></span></div>
+          <div><span class="k">Lux</span><span class="v" x-text="metered.lux + ' lx'"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: histogram + exposure -->
+    <div class="grid" style="align-content:start">
+      <div class="card" x-show="connected" x-cloak>
+        <div class="card-head"><h2>Histogram</h2></div>
+        <div class="hist"><canvas id="histCanvas" width="520" height="90"></canvas></div>
+        <div class="clip-readout mt">
+          <span>clipping&nbsp; R <b :class="{hot: clip.r>0.01}" x-text="pct(clip.r)"></b></span>
+          <span>G <b :class="{hot: clip.g>0.01}" x-text="pct(clip.g)"></b></span>
+          <span>B <b :class="{hot: clip.b>0.01}" x-text="pct(clip.b)"></b></span>
+        </div>
+      </div>
+
+      <div class="card" x-show="connected" x-cloak>
+        <div class="card-head"><h2>Exposure</h2>
+          <label class="flex" style="margin:0;font-weight:600">
+            <input type="checkbox" style="width:auto" x-model="controls.auto_exposure" @change="applyControls()"> Auto
+          </label>
+        </div>
+        <div class="field" :style="controls.auto_exposure ? 'opacity:.45;pointer-events:none' : ''">
+          <label>Exposure time — <span x-text="(controls.exposure/1000).toFixed(1)"></span> ms</label>
+          <input type="range" min="100" max="100000" step="100" x-model.number="controls.exposure" @change="applyControls()">
+        </div>
+        <div class="field" :style="controls.auto_exposure ? 'opacity:.45;pointer-events:none' : ''">
+          <label>Analogue gain — <span x-text="controls.gain"></span>×</label>
+          <input type="range" min="1" max="16" step="0.1" x-model.number="controls.gain" @change="applyControls()">
+        </div>
+        <div class="field" :style="!controls.auto_exposure ? 'opacity:.45;pointer-events:none' : ''">
+          <div class="spread" style="align-items:baseline">
+            <label style="margin:0">Exposure compensation — <span x-text="controls.ev.toFixed(1)"></span> EV</label>
+            <button type="button" class="btn sm ghost" @click="controls.ev = 0; applyControls()">Reset</button>
+          </div>
+          <input type="range" min="-8" max="8" step="0.1" x-model.number="controls.ev" @change="applyControls()">
+          <div class="hint">Biases auto-exposure brighter/darker (active when Auto is on).</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full width: tag & capture -->
+  <div class="card mt">
+    <div class="card-head"><h2>Tag &amp; capture</h2></div>
+    <div class="field-row" style="align-items:flex-end; flex-wrap:wrap">
+      <div class="field" style="flex:0 0 auto; margin:0">
+        <label>Image type</label>
+        <div class="seg">
+          <button type="button" :class="{active: form.image_type==='macbeth'}" @click="form.image_type='macbeth'">Macbeth</button>
+          <button type="button" :class="{active: form.image_type==='alsc'}" @click="form.image_type='alsc'">ALSC</button>
+          <button type="button" :class="{active: form.image_type==='cac'}" @click="form.image_type='cac'">CAC</button>
+        </div>
+      </div>
+      <div class="field" style="flex:0 0 150px; margin:0">
+        <label>Colour temp (K)</label>
+        <input type="number" x-model.number="form.colour_temp" min="1000" max="12000" step="50">
+      </div>
+      <div class="field" x-show="form.image_type==='macbeth'" style="flex:0 0 130px; margin:0">
+        <label>Lux</label>
+        <input type="number" x-model.number="form.lux" min="1" step="1">
+      </div>
+      <div class="field" style="flex:0 0 auto; margin:0">
+        <button class="btn primary" :disabled="!connected || busy" @click="capture()">
+          <span x-text="busy ? 'Capturing…' : '● Capture'"></span>
+        </button>
+      </div>
+    </div>
+    <div class="hint mt">
+      Filename preview: <code x-text="previewName()"></code>
+      <span x-show="form.image_type==='macbeth'"> · Macbeth chart — needs colour temp + lux.</span>
+      <span x-show="form.image_type==='alsc'"> · Defocused, uniform flat field — colour temp only.</span>
+      <span x-show="form.image_type==='cac'"> · Chromatic-aberration dot chart (PiSP) — colour temp only.</span>
+    </div>
+    <div class="banner error mt" x-show="error" x-text="error" x-cloak></div>
+  </div>
+
+  <!-- Full width: captured images -->
+  <div class="card mt">
+    <div class="card-head">
+      <h2>Captured images (<span x-text="captures.length"></span>)</h2>
+    </div>
+    <div class="shot-grid" x-show="captures.length">
+      <template x-for="c in captures" :key="c.filename">
+        <div class="shot" :class="{invalid: !c.valid}">
+          <button class="btn sm danger x" @click="remove(c.filename)">✕</button>
+          <div class="fname" x-text="c.filename"></div>
+          <div class="meta">
+            <span class="chip" :class="c.image_type" x-text="c.image_type"></span>
+            <span class="chip" x-text="c.colour_temp + 'K'"></span>
+            <template x-if="c.lux"><span class="chip" x-text="c.lux + ' lx'"></span></template>
+          </div>
+        </div>
+      </template>
+    </div>
+    <div class="empty" x-show="!captures.length"><div class="big">🎞️</div>No images captured yet.</div>
+  </div>
+
+  <!-- Full width: coverage checklist -->
+  <div class="card mt">
+    <div class="card-head"><h2>Coverage checklist</h2></div>
+    <div class="stats mt" style="margin-top:0">
+      <div class="stat"><div class="n" x-text="counts.macbeth"></div><div class="l">Macbeth</div></div>
+      <div class="stat"><div class="n" x-text="counts.alsc"></div><div class="l">ALSC</div></div>
+      <div class="stat"><div class="n" x-text="counts.cac"></div><div class="l">CAC</div></div>
+    </div>
+    <ul class="checklist mt">
+      <template x-for="item in checklist()" :key="item.key">
+        <li :class="{done: item.done}">
+          <span class="tick">✓</span>
+          <span x-text="item.label"></span>
+          <span class="count" x-text="item.detail"></span>
+        </li>
+      </template>
+    </ul>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/alpine.min.js') }}" defer></script>
+{% endblock %}

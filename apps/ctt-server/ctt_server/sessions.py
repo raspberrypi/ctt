@@ -1,0 +1,179 @@
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# Copyright (C) 2026, Raspberry Pi
+#
+# Project (capture session) model.
+#
+# A project is a directory under the workspace root that holds the captured
+# .dng files (in its root, exactly where `ctt -i <dir>` expects them) plus a
+# project.json sidecar recording per-capture metadata. CTT only reads .dng
+# files from the directory root and ignores everything else, so project.json
+# and the output/ subdirectory are invisible to it.
+
+import json
+import os
+import re
+import shutil
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+
+from . import naming
+
+_SIDECAR = 'project.json'
+_OUTPUT_DIRNAME = 'output'
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec='seconds')
+
+
+def default_workspace() -> Path:
+    """Workspace root holding all projects. Override with $CTT_CAPTURE_WORKSPACE."""
+    env = os.environ.get('CTT_CAPTURE_WORKSPACE')
+    root = Path(env) if env else Path.home() / 'ctt-server-workspace'
+    return root
+
+
+def _safe_project_name(name: str) -> str:
+    clean = re.sub(r'[^A-Za-z0-9._-]', '_', name.strip())
+    clean = clean.strip('._-')
+    if not clean:
+        raise ValueError(f'Invalid project name: {name!r}')
+    return clean
+
+
+@dataclass
+class Capture:
+    """One captured image and its tags."""
+
+    filename: str
+    image_type: str
+    colour_temp: int
+    lux: int | None = None
+    label: str | None = None
+    controls: dict = field(default_factory=dict)
+    captured_at: str = field(default_factory=_now_iso)
+
+
+class Project:
+    """A capture session backed by a directory of .dng files + project.json."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        self.captures: list[Capture] = []
+        self.created_at = _now_iso()
+        self.notes = ''
+        if self.sidecar.exists():
+            self._load()
+
+    # --- paths -------------------------------------------------------------
+    @property
+    def name(self) -> str:
+        return self.path.name
+
+    @property
+    def sidecar(self) -> Path:
+        return self.path / _SIDECAR
+
+    @property
+    def output_dir(self) -> Path:
+        return self.path / _OUTPUT_DIRNAME
+
+    # --- persistence -------------------------------------------------------
+    def _load(self) -> None:
+        data = json.loads(self.sidecar.read_text())
+        self.created_at = data.get('created_at', self.created_at)
+        self.notes = data.get('notes', '')
+        self.captures = [Capture(**c) for c in data.get('captures', [])]
+
+    def save(self) -> None:
+        self.path.mkdir(parents=True, exist_ok=True)
+        data = {
+            'name': self.name,
+            'created_at': self.created_at,
+            'notes': self.notes,
+            'captures': [asdict(c) for c in self.captures],
+        }
+        self.sidecar.write_text(json.dumps(data, indent=2))
+
+    # --- captures ----------------------------------------------------------
+    def _dng_names(self) -> list[str]:
+        return [p.name for p in self.path.glob('*.dng')]
+
+    def add_capture(
+        self,
+        dng_bytes: bytes,
+        image_type: str,
+        colour_temp: int,
+        *,
+        lux: int | None = None,
+        label: str | None = None,
+        controls: dict | None = None,
+    ) -> Capture:
+        """Write a DNG with a CTT-correct filename and record its metadata."""
+        # Macbeth filenames are prefixed with the project (sensor) name by default.
+        if image_type == 'macbeth' and not label:
+            label = self.name
+        index = naming.next_index(self._dng_names(), image_type, colour_temp)
+        filename = naming.build_filename(image_type, colour_temp, lux=lux, label=label, index=index)
+        self.path.mkdir(parents=True, exist_ok=True)
+        (self.path / filename).write_bytes(dng_bytes)
+        capture = Capture(
+            filename=filename,
+            image_type=image_type,
+            colour_temp=colour_temp,
+            lux=lux,
+            label=label,
+            controls=controls or {},
+        )
+        self.captures.append(capture)
+        self.save()
+        return capture
+
+    def delete_capture(self, filename: str) -> None:
+        target = self.path / filename
+        if target.exists() and target.suffix == '.dng':
+            target.unlink()
+        self.captures = [c for c in self.captures if c.filename != filename]
+        self.save()
+
+    def counts(self) -> dict[str, int]:
+        out = {'macbeth': 0, 'alsc': 0, 'cac': 0}
+        for c in self.captures:
+            out[c.image_type] = out.get(c.image_type, 0) + 1
+        return out
+
+
+class Workspace:
+    """Container for projects under a workspace root directory."""
+
+    def __init__(self, root: str | Path | None = None) -> None:
+        self.root = Path(root) if root else default_workspace()
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def list_projects(self) -> list[Project]:
+        projects = []
+        for child in sorted(self.root.iterdir()):
+            if child.is_dir() and (child / _SIDECAR).exists():
+                projects.append(Project(child))
+        return projects
+
+    def get_project(self, name: str) -> Project:
+        path = self.root / _safe_project_name(name)
+        if not (path / _SIDECAR).exists():
+            raise FileNotFoundError(f'No such project: {name!r}')
+        return Project(path)
+
+    def create_project(self, name: str) -> Project:
+        path = self.root / _safe_project_name(name)
+        if (path / _SIDECAR).exists():
+            raise FileExistsError(f'Project already exists: {name!r}')
+        project = Project(path)
+        project.save()
+        return project
+
+    def delete_project(self, name: str) -> None:
+        path = self.root / _safe_project_name(name)
+        if path.exists():
+            shutil.rmtree(path)
