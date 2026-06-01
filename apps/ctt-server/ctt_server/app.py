@@ -23,6 +23,8 @@ from flask import (
     url_for,
 )
 
+from ctt.devices import LightboxError, get_shared_lightbox
+
 from . import ctt_runner, results
 from .camera import (
     MJPEG_CONTENT_TYPE,
@@ -73,6 +75,29 @@ def create_app(workspace_root: str | None = None) -> Flask:
             return get_shared_camera()
         except CameraError as err:
             abort(503, str(err))
+
+    def lightbox_or_none():
+        """The shared lightbox, or None when no device (or pyusb) is available."""
+        try:
+            return get_shared_lightbox()
+        except LightboxError:
+            return None
+
+    def lightbox_or_503():
+        box = lightbox_or_none()
+        if box is None:
+            abort(503, 'No lightbox detected')
+        return box
+
+    def lightbox_status() -> dict:
+        box = lightbox_or_none()
+        if box is None:
+            return {'present': False}
+        try:
+            info = box.info()
+            return {'present': True, 'illuminants': box.illuminants, **info}
+        except LightboxError:  # device went away mid-session
+            return {'present': False}
 
     # --- pages -------------------------------------------------------------
     @app.route('/')
@@ -175,6 +200,33 @@ def create_app(workspace_root: str | None = None) -> Flask:
         except CameraError as err:
             return jsonify({'error': str(err)}), 503
         return jsonify({'tuning': None, 'model': cam.model})
+
+    # --- lightbox API ------------------------------------------------------
+    @app.route('/api/lightbox', methods=['GET'])
+    def api_lightbox():
+        return jsonify(lightbox_status())
+
+    @app.route('/api/lightbox', methods=['POST'])
+    def api_set_lightbox():
+        box = lightbox_or_503()
+        body = request.get_json(force=True) or {}
+        percent = body.get('percent')
+        try:
+            if body.get('off'):
+                box.off()
+            elif body.get('illuminant') is not None:
+                box.set_illuminant(body['illuminant'], None if percent is None else float(percent))
+            elif body.get('channel') is not None:
+                channel = int(body['channel'])
+                if percent is None:
+                    box.set_channel(channel)
+                else:
+                    box.set_intensity(channel, float(percent))
+            elif percent is not None:
+                box.set_intensity(box.get_channel(), float(percent))
+        except (LightboxError, TypeError, ValueError) as err:
+            return jsonify({'error': str(err)}), 400
+        return jsonify(lightbox_status())
 
     @app.route('/projects/<name>/capture', methods=['POST'])
     def capture(name: str):

@@ -128,6 +128,7 @@ function captureApp(cfg) {
     metered: { exposure: 0, gain: 0, colour_temp: 0, lux: 0 },
     clip: { r: 0, g: 0, b: 0 },
     macbeth: { found: false, confidence: null, corners: null, small: false, saturated: false },
+    lightbox: { present: false, channel: null, illuminant: '', intensity: 0, illuminants: {} },
     busy: false,
     error: '',
 
@@ -143,6 +144,7 @@ function captureApp(cfg) {
       } catch (e) {
         this.connected = false;
       }
+      this.loadLightbox();  // independent of the camera
       if (this.connected) {
         // Returning from a Results-page preview test: restore the default tuning.
         // Idempotent server-side (no-op when already on the default).
@@ -151,6 +153,38 @@ function captureApp(cfg) {
         this.pollHistogram();
       }
     },
+
+    async loadLightbox() {
+      try {
+        const r = await fetch('/api/lightbox');
+        if (r.ok) this.lightbox = await r.json();
+      } catch (e) { /* lightbox is optional */ }
+    },
+
+    async postLightbox(body) {
+      try {
+        const r = await fetch('/api/lightbox', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (r.ok) { this.lightbox = await r.json(); }
+        else { const d = await r.json().catch(() => ({})); this.error = d.error || 'Lightbox command failed'; }
+      } catch (e) { this.error = 'Lightbox request failed'; }
+    },
+
+    setIlluminant() {
+      this.seedColourTemp();  // seed the capture colour temp from the illuminant's nominal CCT
+      this.postLightbox({ channel: Number(this.lightbox.channel) });
+    },
+
+    // Seed the Tag & capture colour temp from the selected illuminant's nominal
+    // CCT (from the lightbox API); fall back to 6500 K when the channel has none.
+    seedColourTemp() {
+      const temps = this.lightbox.illuminant_temps || {};
+      this.form.colour_temp = Number(temps[this.lightbox.channel] ?? 6500);
+    },
+    applyLightbox() { this.postLightbox({ channel: Number(this.lightbox.channel), percent: this.lightbox.intensity }); },
+    lightboxOff() { this.postLightbox({ off: true }); },
 
     updateCounts() {
       const c = { macbeth: 0, alsc: 0, cac: 0 };

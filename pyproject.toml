@@ -28,11 +28,17 @@ test = ["pytest>=8.0"]
 # Runs on the Raspberry Pi; picamera2 is a system package (ships with Pi OS), imported
 # lazily, so it is intentionally not a pip dependency here.
 server = ["flask>=3.0"]
+# Optional: control a USB lightbox (e.g. Image Engineering lightSTUDIO-S) from the
+# Pi. pyusb is lazy-imported so core CTT is unaffected; also needs a libusb backend
+# (sudo apt install libusb-1.0-0). See apps/ctt/ctt/devices/.
+devices = ["pyusb>=1.2"]
 
 [project.scripts]
 ctt = "ctt.ctt:main"
 # ctt-server web UI (Flask). See README.md.
 ctt-server = "ctt_server.__main__:main"
+# Lightbox control CLI. See apps/ctt/ctt/devices/.
+ctt-lightbox = "ctt.devices.__main__:main"
 
 [tool.setuptools.packages.find]
 # Discover the ctt CLI under apps/ctt and the web app under apps/ctt-server.
@@ -41,6 +47,7 @@ include = ["ctt*", "ctt_server*"]
 
 [tool.setuptools.package-data]
 "ctt.data" = ["*.pgm", "*.json"]
+"ctt.devices.lightstudio_s" = ["contrib/*.rules"]
 "ctt_server" = ["templates/*.html", "static/*", "static/**/*"]
 
 [tool.pytest.ini_options]
