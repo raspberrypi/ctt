@@ -29,6 +29,8 @@ test = ["pytest>=8.0"]
 ctt = "ctt.ctt:main"
 
 [tool.setuptools.packages.find]
+# The core ctt package lives under apps/ctt.
+where = ["apps/ctt"]
 include = ["ctt*"]
 
 [tool.setuptools.package-data]
@@ -40,6 +42,9 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py311"
 line-length = 120
+# First-party source roots (the apps live under apps/), so import sorting keeps
+# ctt / ctt_server grouped as first-party.
+src = ["apps/ctt", "apps/ctt-server"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
