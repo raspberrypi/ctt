@@ -4,8 +4,8 @@
 #
 # Run the CTT in-process and stream its progress.
 #
-# We call ctt.ctt.run_ctt directly (mirroring ctt.ctt.main()'s per-target loop)
-# rather than spawning `python -m ctt`. CTT routes all progress through the
+# We call ctt.core.runner.run_ctt_targets directly (the same shared pipeline the
+# CLI uses) rather than spawning `python -m ctt`. CTT routes all progress through the
 # `logging` module, so we capture it by attaching a handler to the `ctt` logger
 # and relaying each line to the browser over SSE. The calibration runs in a
 # worker thread so the SSE generator can stream lines as they are produced.
@@ -108,7 +108,7 @@ def run_ctt_stream(
             # Set a headless matplotlib backend before importing ctt (its
             # algorithm modules import matplotlib at import time).
             os.environ.setdefault('MPLBACKEND', 'Agg')
-            from ctt.ctt import get_platform, load_template, run_ctt
+            from ctt.core.runner import run_ctt_targets
             from ctt.utils.errors import ArgError
 
             ctt_logger = logging.getLogger('ctt')
@@ -119,21 +119,15 @@ def run_ctt_stream(
             ctt_logger.propagate = False
             code = 0
             try:
-                for target in targets:
-                    platform = get_platform(target)
-                    json_template = load_template(platform)
-                    run_ctt(
-                        project.output_dir,
-                        project.name,
-                        str(project.path),
-                        str(config_path),
-                        json_template,
-                        platform.grid_size,
-                        target,
-                        alsc_only=alsc_only,
-                        colour_only=colour_only,
-                        plot_cli=None,
-                    )
+                run_ctt_targets(
+                    project.output_dir,
+                    project.name,
+                    str(project.path),
+                    str(config_path),
+                    targets,
+                    alsc_only=alsc_only,
+                    colour_only=colour_only,
+                )
             except ArgError as err:
                 code = 1
                 for line in str(err).splitlines():
