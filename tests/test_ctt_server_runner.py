@@ -4,6 +4,8 @@
 #
 # Tests for ctt_server session model and in-process CTT execution.
 
+import json
+
 from ctt_server import ctt_runner, sessions
 
 
@@ -21,6 +23,33 @@ def test_session_add_and_count(tmp_path):
     # Reloading the project from disk restores capture metadata.
     reloaded = ws.get_project('imx-test')
     assert reloaded.counts() == {'macbeth': 1, 'alsc': 1, 'cac': 0}
+
+
+def test_recapture_same_name_overwrites_not_duplicates(tmp_path):
+    # Re-capturing a macbeth image at the same colour temp + lux reuses the
+    # filename, so the metadata entry is replaced in place, not duplicated.
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('imx-test')
+    first = proj.add_capture(b'FIRST', 'macbeth', 5000, lux=1000)
+    second = proj.add_capture(b'SECOND', 'macbeth', 5000, lux=1000)
+
+    assert first.filename == second.filename  # same colour temp + lux ⇒ same name
+    assert proj.counts()['macbeth'] == 1
+    assert [c.filename for c in proj.captures] == [second.filename]
+    # On-disk DNG reflects the latest capture.
+    assert (proj.path / second.filename).read_bytes() == b'SECOND'
+
+
+def test_load_heals_duplicate_filenames(tmp_path):
+    # A project.json written by an older build may contain duplicate filenames;
+    # loading collapses them to a single entry.
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('imx-test')
+    dup = {'filename': 'imx-test_5000k_1000l.dng', 'image_type': 'macbeth', 'colour_temp': 5000, 'lux': 1000}
+    proj.sidecar.write_text(json.dumps({'captures': [dup, dict(dup)]}))
+
+    reloaded = ws.get_project('imx-test')
+    assert reloaded.counts()['macbeth'] == 1
 
 
 def test_session_delete_capture(tmp_path):

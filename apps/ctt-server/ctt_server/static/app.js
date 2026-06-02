@@ -287,6 +287,13 @@ function captureApp(cfg) {
 
     async capture() {
       this.error = '';
+      // Warn before overwriting: a re-capture at the same colour temp + lux
+      // reuses the filename and replaces the existing image on disk.
+      const name = this.previewName();
+      if (this.captures.some((c) => c.filename === name) &&
+          !confirm(`“${name}” already exists. Capturing again will overwrite it. Continue?`)) {
+        return;
+      }
       this.busy = true;
       try {
         const r = await fetch(`/projects/${this.project}/capture`, {
@@ -299,10 +306,14 @@ function captureApp(cfg) {
         });
         const data = await r.json();
         if (!r.ok) { this.error = data.error || 'Capture failed'; return; }
-        this.captures.unshift({
+        const entry = {
           filename: data.filename, image_type: data.image_type,
           colour_temp: data.colour_temp, lux: data.lux, label: data.label, valid: true,
-        });
+        };
+        // Replace the existing entry on overwrite, otherwise add to the top.
+        const idx = this.captures.findIndex((c) => c.filename === data.filename);
+        if (idx >= 0) this.captures.splice(idx, 1, entry);
+        else this.captures.unshift(entry);
         this.updateCounts();
       } catch (e) {
         this.error = 'Capture request failed';
