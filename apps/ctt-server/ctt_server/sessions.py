@@ -85,7 +85,13 @@ class Project:
         data = json.loads(self.sidecar.read_text())
         self.created_at = data.get('created_at', self.created_at)
         self.notes = data.get('notes', '')
-        self.captures = [Capture(**c) for c in data.get('captures', [])]
+        # Heal any duplicate filenames from older saves (a re-capture at the same
+        # colour temp + lux overwrites the DNG, so only one entry is meaningful).
+        # Keep the original position but the most recent metadata (last wins).
+        by_name: dict[str, Capture] = {}
+        for c in (Capture(**c) for c in data.get('captures', [])):
+            by_name[c.filename] = c
+        self.captures = list(by_name.values())
 
     def save(self) -> None:
         self.path.mkdir(parents=True, exist_ok=True)
@@ -127,7 +133,13 @@ class Project:
             label=label,
             controls=controls or {},
         )
-        self.captures.append(capture)
+        # Re-capturing the same filename overwrites the DNG on disk (above), so
+        # replace the existing metadata entry in place rather than duplicating it.
+        existing = next((i for i, c in enumerate(self.captures) if c.filename == filename), None)
+        if existing is not None:
+            self.captures[existing] = capture
+        else:
+            self.captures.append(capture)
         self.save()
         return capture
 
