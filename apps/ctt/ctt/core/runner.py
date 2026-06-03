@@ -239,6 +239,20 @@ def run_ctt(
         n_macbeth = len(cam.imgs)
         n_alsc = len(cam.imgs_alsc)
         n_cac = len(cam.imgs_cac)
+        _write_metrics(
+            cam,
+            json_output,
+            target=target,
+            mode=mode,
+            config={
+                'luminance_strength': luminance_strength,
+                'max_gain': lsc_max_gain,
+                'do_alsc_colour': do_alsc_colour,
+                'matrix_selection': ccm_matrix_selection,
+                'greyworld': greyworld,
+                'blacklevel': blacklevel,
+            },
+        )
         counts = f'Macbeth: {n_macbeth}  ALSC: {n_alsc}  CAC: {n_cac}'
         lines = [
             'Calibration complete',
@@ -250,6 +264,39 @@ def run_ctt(
         logger.info('\n' + '\n'.join(lines))
     else:
         cam.write_log(log_output)
+
+
+def _write_metrics(cam: Camera, json_output: str, *, target: str, mode: str, config: dict) -> None:
+    """Write a structured metrics sidecar ({stem}_metrics.json) for the web UI.
+
+    Best-effort: a failure here must never abort an otherwise-successful
+    calibration, so any error is logged and swallowed.
+    """
+    try:
+        cols = sorted({img.col for img in cam.imgs if getattr(img, 'col', None) is not None})
+        awb = cam.json.get('rpi.awb', {}) if isinstance(cam.json.get('rpi.awb'), dict) else {}
+        ccm = cam.json.get('rpi.ccm', {}) if isinstance(cam.json.get('rpi.ccm'), dict) else {}
+        cam.metrics['counts'] = {
+            'macbeth': len(cam.imgs),
+            'alsc': len(cam.imgs_alsc),
+            'cac': len(cam.imgs_cac),
+        }
+        cam.metrics['coverage'] = {
+            'ct_min': cols[0] if cols else None,
+            'ct_max': cols[-1] if cols else None,
+            'ct_count': len(cols),
+            'ccm_matrices': len(ccm.get('ccms', [])),
+            'awb_points': len(awb.get('ct_curve', [])) // 3,
+        }
+        cam.metrics['config'] = config
+        cam.metrics['target'] = target
+        cam.metrics['mode'] = mode
+
+        metrics_output = f'{Path(json_output).with_suffix("")}_metrics.json'
+        with open(metrics_output, 'w') as f:
+            json.dump(cam.metrics, f, indent=2)
+    except Exception as err:  # pragma: no cover - defensive, never break a run
+        logger.warning(f'Could not write metrics sidecar: {type(err).__name__}: {err}')
 
 
 def _interpolate_ccm(ccms: list[dict], target_ct: int) -> list[float]:

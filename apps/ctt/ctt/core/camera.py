@@ -60,6 +60,13 @@ class Camera:
         self.plot = []
         self.mono = False
         self.blacklevel_16 = 0
+        # Structured calibration metrics, written alongside the JSON/log as a
+        # sidecar for the web UI. Populated by the algorithms as they run.
+        self.metrics: dict = {'warnings': [], 'ccm': [], 'counts': {}, 'coverage': {}, 'config': {}}
+
+    def add_warning(self, level: str, message: str, image: str | None = None) -> None:
+        """Record a structured calibration warning (level: 'warn' or 'error')."""
+        self.metrics['warnings'].append({'level': level, 'message': message, 'image': image})
 
     def write_json(self, version: float = 2.0, target: str = 'bcm2835', grid_size: tuple[int, int] = (16, 12)) -> None:
         out_json = {
