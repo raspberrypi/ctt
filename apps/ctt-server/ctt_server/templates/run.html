@@ -27,6 +27,20 @@
       </div>
     </div>
 
+    <div class="field">
+      <label>CCM optimisation</label>
+      <div class="seg">
+        <button type="button" :class="{active: matrixSelection==='average'}" @click="matrixSelection='average'">Average ΔE</button>
+        <button type="button" :class="{active: matrixSelection==='maximum'}" @click="matrixSelection='maximum'">Worst ΔE</button>
+        <button type="button" :class="{active: matrixSelection==='patches'}" @click="matrixSelection='patches'">Patches</button>
+      </div>
+      <div class="hint">What the colour matrix minimises: average across all patches (default), the single worst patch, or a chosen subset.</div>
+    </div>
+    <div class="field" x-show="matrixSelection==='patches'" x-cloak>
+      <label>Test patches (1–24, comma-separated)</label>
+      <input type="text" x-model="testPatches" placeholder="1,2,5,8,9,12,14">
+    </div>
+
     <div class="divider"></div>
 
     <label class="flex" style="margin-bottom:12px;font-weight:600">
