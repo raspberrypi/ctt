@@ -132,6 +132,9 @@ function captureApp(cfg) {
     busy: false,
     error: '',
     uploadMsg: '',
+    hflip: false,
+    vflip: false,
+    previewTick: 0,  // bumped to reconnect the MJPEG <img> after a camera reconfigure
 
     async init() {
       this.updateCounts();
@@ -142,6 +145,7 @@ function captureApp(cfg) {
         if (h.model) this.camera.model = h.model;
         if (h.resolution) this.camera.resolution = h.resolution;
         if (h.controls) this.metered = h.controls;
+        this.hflip = !!h.hflip; this.vflip = !!h.vflip;
       } catch (e) {
         this.connected = false;
       }
@@ -153,6 +157,17 @@ function captureApp(cfg) {
         this.loadControls();
         this.pollHistogram();
       }
+    },
+
+    async applyTransform() {
+      // Reconfigure the camera with the new flip and reconnect the preview stream.
+      try {
+        await fetch('/api/transform', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hflip: this.hflip, vflip: this.vflip }),
+        });
+        this.previewTick = Date.now();  // force the MJPEG <img> to reopen on the reconfigured camera
+      } catch (e) { this.error = 'Failed to set flip'; }
     },
 
     async loadLightbox() {

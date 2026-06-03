@@ -22,7 +22,7 @@
         <div class="preview-wrap" :class="{ louping: loupe.active }" @dragstart.prevent
              @pointerdown="loupeStart($event)" @pointermove="loupeMove($event)"
              @pointerup="loupeEnd($event)" @pointerleave="loupeEnd($event)" @pointercancel="loupeEnd($event)">
-          <img id="previewImg" draggable="false" x-show="connected" :src="connected ? '{{ url_for('api_preview') }}' : ''" alt="camera preview">
+          <img id="previewImg" draggable="false" x-show="connected" :src="connected ? ('{{ url_for('api_preview') }}' + (previewTick ? ('?t=' + previewTick) : '')) : ''" alt="camera preview">
           <canvas id="macbethOverlay" class="overlay" x-show="connected" x-cloak></canvas>
           <div id="loupeMarker" class="loupe-marker" x-show="loupe.active" x-cloak></div>
           <canvas id="loupeCanvas" class="loupe" width="220" height="220" x-show="loupe.active" x-cloak></canvas>
@@ -37,9 +37,16 @@
         </div>
       </div>
       <div class="caminfo" x-show="connected" x-cloak>
-        <div class="caminfo-row" style="grid-template-columns: repeat(2, 1fr)">
+        <div class="caminfo-row" style="grid-template-columns: repeat(4, 1fr)">
           <div><span class="k">Sensor</span><span class="v" x-text="camera.model || '—'"></span></div>
           <div><span class="k">Resolution</span><span class="v" x-text="camera.resolution ? camera.resolution[0] + ' × ' + camera.resolution[1] : '—'"></span></div>
+          <div>
+            <span class="k">Flips</span>
+            <div class="seg compact" style="align-self:flex-start">
+              <button type="button" :class="{active: hflip}" @click="hflip=!hflip; applyTransform()" title="Horizontal flip">H</button>
+              <button type="button" :class="{active: vflip}" @click="vflip=!vflip; applyTransform()" title="Vertical flip">V</button>
+            </div>
+          </div>
         </div>
         <div class="caminfo-row" style="grid-template-columns: repeat(4, 1fr)">
           <div><span class="k">Exposure</span><span class="v" x-text="(metered.exposure/1000).toFixed(1) + ' ms'"></span></div>

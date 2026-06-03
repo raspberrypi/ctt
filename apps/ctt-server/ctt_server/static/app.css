@@ -290,3 +290,4 @@ td.mono { font-family: var(--mono); }
 .seg { display: inline-flex; background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--radius-sm); padding: 3px; gap: 3px; }
 .seg button { border: none; background: transparent; color: var(--text-dim); padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600; font-size: 0.85rem; }
 .seg button.active { background: var(--accent); color: #fff; }
+.seg.compact button { padding: 3px 9px; font-size: 0.78rem; }
