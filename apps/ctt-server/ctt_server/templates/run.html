@@ -1,16 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Run · {{ project.name }}{% endblock %}
 {% block body %}
-<div class="page-head spread">
-  <div>
-    <h1>Run CTT — {{ project.name }}</h1>
-    <div class="sub">{{ counts.macbeth }} Macbeth · {{ counts.alsc }} ALSC · {{ counts.cac }} CAC images</div>
-  </div>
-  <div class="btn-row">
-    <a class="btn ghost" href="{{ url_for('project', name=project.name) }}">&larr; Capture</a>
-    <a class="btn" href="{{ url_for('results_page', name=project.name) }}">Results &rarr;</a>
-  </div>
-</div>
+{% set active_tab = 'run' %}
+{% include '_project_tabs.html' %}
+<p class="muted" style="margin:-12px 0 20px">{{ counts.macbeth }} Macbeth · {{ counts.alsc }} ALSC · {{ counts.cac }} CAC images</p>
 
 <div class="grid" x-data='runApp({ project: {{ project.name|tojson }} })'>
   <div class="card">

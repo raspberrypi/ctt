@@ -1,16 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Results · {{ project.name }}{% endblock %}
 {% block body %}
-<div class="page-head spread">
-  <div>
-    <h1>Results — {{ project.name }}</h1>
-    <div class="sub">Calibration quality metrics</div>
-  </div>
-  <div class="btn-row">
-    <a class="btn ghost" href="{{ url_for('project', name=project.name) }}">&larr; Capture</a>
-    <a class="btn" href="{{ url_for('tuning_page', name=project.name) }}">Tuning</a>
-  </div>
-</div>
+{% set active_tab = 'results' %}
+{% include '_project_tabs.html' %}
 
 {% if not files %}
   <div class="card"><div class="empty"><div class="big">📄</div>No tuning files yet.
