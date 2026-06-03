@@ -1,17 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ project.name }} · ctt-server{% endblock %}
 {% block body %}
-<div class="page-head spread">
-  <div>
-    <h1>{{ project.name }}</h1>
-    <div class="sub">Capture &amp; tag calibration images</div>
-  </div>
-  <div class="btn-row">
-    <a class="btn" href="{{ url_for('run_page', name=project.name) }}">Run CTT &rarr;</a>
-    <a class="btn ghost" href="{{ url_for('results_page', name=project.name) }}">Results</a>
-    <a class="btn ghost" href="{{ url_for('tuning_page', name=project.name) }}">Tuning</a>
-  </div>
-</div>
+{% set active_tab = 'capture' %}
+{% include '_project_tabs.html' %}
 
 <div x-data='captureApp({
         project: {{ project.name|tojson }},

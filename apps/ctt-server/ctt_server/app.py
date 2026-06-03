@@ -318,6 +318,13 @@ def create_app(workspace_root: str | None = None) -> Flask:
         available = {t: f for t, f in files.items() if f['json']}
         return render_template('tuning.html', project=proj, files=available)
 
+    @app.route('/projects/<name>/preview')
+    def preview_page(name: str):
+        proj = get_project_or_404(name)
+        files = ctt_runner.output_files(proj, ['pisp', 'vc4'])
+        available = {t: f for t, f in files.items() if f['json']}
+        return render_template('preview.html', project=proj, files=available)
+
     @app.route('/projects/<name>/results/data')
     def results_data(name: str):
         proj = get_project_or_404(name)
