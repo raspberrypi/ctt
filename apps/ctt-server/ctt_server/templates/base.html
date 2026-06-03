@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}ctt-server{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ asset_v }}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='7' fill='%23d6336c'/></svg>">
 </head>
 <body>
@@ -23,7 +23,7 @@
     {% block body %}{% endblock %}
   </main>
   <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_v }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

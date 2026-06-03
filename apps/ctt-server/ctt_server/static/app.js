@@ -448,6 +448,8 @@ function resultsApp(cfg) {
     target: cfg.targets[0],
     summary: null,
     charts: {},
+    metrics: null,
+    ccmCt: null,          // selected colour temp for the per-patch ΔE chart
     _charts: {},
     // live preview test
     busy: false,
@@ -493,30 +495,116 @@ function resultsApp(cfg) {
       const data = await r.json();
       this.summary = data.summary;
       this.charts = data.charts || {};
-      this.$nextTick(() => this.renderCharts());
+      this.metrics = data.metrics || null;
+      const ccm = this.metrics && this.metrics.ccm;
+      this.ccmCt = (ccm && ccm.length) ? ccm[0].ct : null;
+      // Wait for Alpine to apply x-show/x-if, then a layout frame, so each
+      // canvas's container has its final size before Chart.js measures it.
+      this.$nextTick(() => requestAnimationFrame(() => this.renderCharts()));
+    },
+
+    // The selected CT's per-patch entry, and its mean/worst ΔE for the stat row.
+    ccmEntry() {
+      const ccm = (this.metrics && this.metrics.ccm) || [];
+      return ccm.find((c) => c.ct === this.ccmCt) || ccm[0] || null;
+    },
+    // Per-patch ΔE was added later; older sidecars only have per-CT aggregates.
+    ccmHasPatches() { return ((this.metrics && this.metrics.ccm) || []).some((c) => c.patches && c.patches.length); },
+    ccmStats() {
+      const e = this.ccmEntry();
+      if (!e) return { mean: null, worst: null };
+      const de = (e.patches || []).map((p) => p.de);
+      if (de.length) return { mean: de.reduce((a, b) => a + b, 0) / de.length, worst: Math.max(...de) };
+      return { mean: e.metric_after, worst: e.max_after };  // legacy fallback
+    },
+    setCcmCt(ct) {
+      this.ccmCt = ct;
+      this._charts.ccm?.destroy();
+      this.$nextTick(() => requestAnimationFrame(() => { try { this.renderCcm(); } catch (e) { console.error(e); } }));
+    },
+
+    // Format a number for display (2 sig-figs-ish), passing through non-numbers.
+    fmt(v) { return (typeof v === 'number' && isFinite(v)) ? (Math.round(v * 100) / 100) : (v ?? '–'); },
+    bandLabel(b) { return { good: 'Good', fair: 'Fair', poor: 'Poor' }[b] || ''; },
+    ctRange() {
+      const c = this.metrics && this.metrics.coverage;
+      if (!c || c.ct_min == null || c.ct_max == null) return '–';
+      return c.ct_min === c.ct_max ? `${c.ct_min}` : `${c.ct_min}–${c.ct_max}`;
     },
 
     renderCharts() {
       for (const k in this._charts) { this._charts[k].destroy?.(); }
       this._charts = {};
-      if (this.charts.awb) this.renderAwb();
-      if (this.charts.alsc) this.renderAlsc();
+      // Each chart is independent: a failure in one must not block the others.
+      try { if (this.charts.awb) this.renderAwb(); } catch (e) { console.error('AWB chart:', e); }
+      try { if (this.charts.alsc) this.renderAlsc(); } catch (e) { console.error('ALSC chart:', e); }
+      try {
+        if (this.metrics && this.metrics.ccm && this.metrics.ccm.length) this.renderCcm();
+      } catch (e) { console.error('CCM chart:', e); }
+    },
+
+    renderCcm() {
+      const ctx = document.getElementById('ccmChart');
+      if (!ctx) return;
+      if (!this.ccmHasPatches()) { this.renderCcmByCt(ctx); return; }  // legacy sidecar
+      const entry = this.ccmEntry();
+      if (!entry || !entry.patches) return;
+      const patches = entry.patches;
+      const opts = chartOpts('Macbeth patch', 'ΔE (CIE2000)');
+      opts.plugins.legend.display = false;
+      opts.plugins.tooltip = { callbacks: { title: (i) => 'Patch ' + (i[0].dataIndex + 1) } };
+      this._charts.ccm = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: patches.map((_, i) => i + 1),
+          // Each bar is filled with the patch's reference colour; height is its ΔE.
+          datasets: [{
+            label: `ΔE · ${entry.ct}K`,
+            data: patches.map((p) => p.de),
+            backgroundColor: patches.map((p) => `rgb(${p.rgb[0]},${p.rgb[1]},${p.rgb[2]})`),
+            borderColor: 'rgba(255,255,255,0.25)', borderWidth: 1,
+          }],
+        },
+        options: opts,
+      });
+    },
+
+    // Fallback for sidecars without per-patch data: worst ΔE per CT, before/after.
+    renderCcmByCt(ctx) {
+      const pts = this.metrics.ccm;
+      this._charts.ccm = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: pts.map((p) => p.ct + 'K'),
+          datasets: [
+            { label: 'Worst ΔE before', data: pts.map((p) => p.max_before), backgroundColor: '#6b7888' },
+            { label: 'Worst ΔE after', data: pts.map((p) => p.max_after), backgroundColor: '#2fb344' },
+          ],
+        },
+        options: chartOpts('Colour temperature', 'ΔE (CIE2000)'),
+      });
     },
 
     renderAwb() {
+      // Plot the white-balance locus: R/G on x, B/G on y, joined in CT order.
       const pts = (this.charts.awb.points || []).slice().sort((a, b) => a.ct - b.ct);
       const ctx = document.getElementById('awbChart');
       if (!ctx) return;
+      const opts = chartOpts('R/G', 'B/G');
+      opts.scales.x.type = 'linear';  // x is a continuous R/G value, not a category
+      opts.plugins.legend.display = false;
+      opts.plugins.tooltip = { callbacks: { label: (i) => `${pts[i.dataIndex].ct}K  (R/G ${i.parsed.x.toFixed(3)}, B/G ${i.parsed.y.toFixed(3)})` } };
       this._charts.awb = new Chart(ctx, {
         type: 'line',
         data: {
-          labels: pts.map((p) => p.ct),
-          datasets: [
-            { label: 'R/G', data: pts.map((p) => p.r), borderColor: '#e5484d', tension: 0.3 },
-            { label: 'B/G', data: pts.map((p) => p.b), borderColor: '#4d8ce5', tension: 0.3 },
-          ],
+          datasets: [{
+            label: 'CT curve',
+            data: pts.map((p) => ({ x: p.r, y: p.b })),
+            borderColor: '#d6336c', backgroundColor: '#d6336c',
+            tension: 0.3, showLine: true, pointRadius: 4,
+          }],
         },
-        options: chartOpts('Colour temperature (K)'),
+        options: opts,
       });
     },
 
@@ -551,13 +639,20 @@ function heat(t) {
   return `rgb(${r},${g},${b})`;
 }
 
-function chartOpts(xTitle) {
+function chartOpts(xTitle, yTitle) {
   return {
     responsive: true,
+    // The canvas lives in a fixed-height .chart-box; fill it rather than deriving
+    // height from width (which blows the canvas up and can render blank when the
+    // container is only just becoming visible).
+    maintainAspectRatio: false,
+    // Draw synchronously on creation; a deferred animation frame can otherwise
+    // fire after Alpine has re-rendered the canvas away (getContext on null).
+    animation: false,
     plugins: { legend: { labels: { color: '#9aa7b8' } } },
     scales: {
       x: { title: { display: true, text: xTitle, color: '#6b7888' }, ticks: { color: '#6b7888' }, grid: { color: '#2b3444' } },
-      y: { ticks: { color: '#6b7888' }, grid: { color: '#2b3444' } },
+      y: { title: { display: !!yTitle, text: yTitle || '', color: '#6b7888' }, ticks: { color: '#6b7888' }, grid: { color: '#2b3444' } },
     },
   };
 }

@@ -9,6 +9,7 @@
 
 import json
 import logging
+from pathlib import Path
 
 from flask import (
     Flask,
@@ -63,6 +64,16 @@ def create_app(workspace_root: str | None = None) -> Flask:
 
     def workspace() -> Workspace:
         return app.config['WORKSPACE']
+
+    @app.context_processor
+    def _asset_version() -> dict:
+        """Cache-busting token so browsers re-fetch app.js/app.css after a deploy."""
+        static = Path(app.static_folder)
+        try:
+            v = int(max((static / f).stat().st_mtime for f in ('app.js', 'app.css')))
+        except OSError:
+            v = 0
+        return {'asset_v': v}
 
     def get_project_or_404(name: str):
         try:
@@ -300,6 +311,13 @@ def create_app(workspace_root: str | None = None) -> Flask:
         available = {t: f for t, f in files.items() if f['json']}
         return render_template('results.html', project=proj, files=available)
 
+    @app.route('/projects/<name>/tuning')
+    def tuning_page(name: str):
+        proj = get_project_or_404(name)
+        files = ctt_runner.output_files(proj, ['pisp', 'vc4'])
+        available = {t: f for t, f in files.items() if f['json']}
+        return render_template('tuning.html', project=proj, files=available)
+
     @app.route('/projects/<name>/results/data')
     def results_data(name: str):
         proj = get_project_or_404(name)
@@ -307,7 +325,8 @@ def create_app(workspace_root: str | None = None) -> Flask:
         json_path = proj.output_dir / f'{proj.name}_{target}.json'
         if not json_path.exists():
             abort(404, 'No tuning file for that target')
-        return jsonify(results.parse_tuning_file(json_path))
+        metrics_path = proj.output_dir / f'{proj.name}_{target}_metrics.json'
+        return jsonify(results.parse_tuning_file(json_path, metrics_path))
 
     @app.route('/projects/<name>/archive')
     def download_archive(name: str):
