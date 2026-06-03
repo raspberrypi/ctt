@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Tuning · {{ project.name }}{% endblock %}
+{% block body %}
+<div class="page-head spread">
+  <div>
+    <h1>Tuning — {{ project.name }}</h1>
+    <div class="sub">Generated tuning files and live preview</div>
+  </div>
+  <div class="btn-row">
+    <a class="btn ghost" href="{{ url_for('results_page', name=project.name) }}">&larr; Results</a>
+  </div>
+</div>
+
+{% if not files %}
+  <div class="card"><div class="empty"><div class="big">📄</div>No tuning files yet.
+    <a href="{{ url_for('run_page', name=project.name) }}">Run CTT</a> to generate them.</div></div>
+{% else %}
+<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }} })' x-init="init()">
+  <!-- Tuning files -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Tuning files</h2>
+      <div class="seg">
+        <template x-for="t in targets" :key="t">
+          <button type="button" :class="{active: target===t}" @click="select(t)" x-text="t.toUpperCase()"></button>
+        </template>
+      </div>
+    </div>
+    <div class="btn-row">
+      <a class="btn primary" :href="'/projects/{{ project.name }}/download/json/'+target">⬇ Download JSON</a>
+      <a class="btn" :href="'/projects/{{ project.name }}/download/log/'+target">⬇ Download log</a>
+      <a class="btn ghost" href="{{ url_for('download_archive', name=project.name) }}">⬇ Download project (.zip)</a>
+    </div>
+    <div class="mt muted" x-show="summary">
+      Target <b x-text="summary?.target"></b> · version <span x-text="summary?.version"></span> ·
+      <span x-text="summary?.algorithms?.length"></span> algorithm blocks
+      <template x-if="summary?.black_level !== undefined"> · black level <b x-text="summary?.black_level"></b></template>
+    </div>
+  </div>
+
+  <!-- Live preview test -->
+  <div class="card mt">
+    <div class="card-head"><h2>Live preview test</h2></div>
+    <div class="banner error mt" x-show="testError" x-text="testError" x-cloak></div>
+    <p class="muted" x-show="!testing" x-cloak>
+      Restart the camera with the generated tuning and preview it live to judge the
+      result. Uses the tuning matching this Pi's ISP; returning to Capture restores the
+      default tuning.
+    </p>
+    <div class="btn-row">
+      <button class="btn primary" x-show="!testing" @click="startPreviewTest()" :disabled="busy">
+        <span x-text="busy ? 'Starting…' : '▶ Start live preview'"></span>
+      </button>
+      <button class="btn ghost" x-show="testing" @click="restoreDefault()" :disabled="busy">■ Stop (restore default)</button>
+    </div>
+    <div x-show="testing" x-cloak>
+      <div class="muted mt">Previewing <b x-text="testTuning"></b> · <span x-text="testTarget && testTarget.toUpperCase()"></span></div>
+      <div class="preview-wrap big mt" :class="{ louping: loupe.active }" @dragstart.prevent
+           @pointerdown="loupeStart($event)" @pointermove="loupeMove($event)"
+           @pointerup="loupeEnd($event)" @pointerleave="loupeEnd($event)" @pointercancel="loupeEnd($event)">
+        <img id="resultPreviewImg" draggable="false" :src="previewSrc" alt="live tuning preview">
+        <div id="resultLoupeMarker" class="loupe-marker" x-show="loupe.active" x-cloak></div>
+        <canvas id="resultLoupeCanvas" class="loupe" width="220" height="220" x-show="loupe.active" x-cloak></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/alpine.min.js') }}" defer></script>
+{% endblock %}
