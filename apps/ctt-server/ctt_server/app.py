@@ -225,6 +225,22 @@ def create_app(workspace_root: str | None = None) -> Flask:
             return jsonify({'error': str(err)}), 503
         return jsonify({'tuning': None, 'model': cam.model})
 
+    @app.route('/projects/<name>/preview-capture')
+    def preview_capture(name: str):
+        """Download a full-resolution PNG still from the live preview camera."""
+        proj = get_project_or_404(name)
+        cam = camera_or_503()
+        try:
+            png = cam.capture_png()
+        except CameraError as err:
+            abort(503, str(err))
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        return Response(
+            png,
+            mimetype='image/png',
+            headers={'Content-Disposition': f'attachment; filename="{proj.name}_{stamp}.png"'},
+        )
+
     # --- lightbox API ------------------------------------------------------
     @app.route('/api/lightbox', methods=['GET'])
     def api_lightbox():
@@ -367,7 +383,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
         proj = get_project_or_404(name)
         files = ctt_runner.output_files(proj, ['pisp', 'vc4'])
         available = {t: f for t, f in files.items() if f['json']}
-        return render_template('preview.html', project=proj, files=available)
+        return render_template('preview.html', project=proj, files=available, runs=_run_info(available))
 
     @app.route('/projects/<name>/results/data')
     def results_data(name: str):

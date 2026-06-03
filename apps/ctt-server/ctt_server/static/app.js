@@ -158,7 +158,18 @@ function captureApp(cfg) {
     async loadLightbox() {
       try {
         const r = await fetch('/api/lightbox');
-        if (r.ok) this.lightbox = await r.json();
+        if (!r.ok) return;
+        const lb = await r.json();
+        const ch = lb.channel;  // capture before mutating: lb IS this.lightbox below
+        this.lightbox = lb;
+        if (lb.present && ch != null) {
+          // Re-assert the active channel once the <select>'s x-for <option>s exist:
+          // Alpine applies x-model before the options render, so the dropdown would
+          // otherwise show the first illuminant. The -1 forces a reactive change so
+          // the nextTick reassignment re-syncs the <select>. Then seed the colour temp.
+          this.lightbox.channel = -1;
+          this.$nextTick(() => { this.lightbox.channel = ch; this.seedColourTemp(); });
+        }
       } catch (e) { /* lightbox is optional */ }
     },
 
@@ -494,6 +505,7 @@ function resultsApp(cfg) {
     testing: false,
     testTarget: null,
     testTuning: null,
+    testKind: null,       // 'generated' | 'standard' — which tuning is live
     previewSrc: '',
     testError: '',
 
@@ -508,12 +520,53 @@ function resultsApp(cfg) {
         const r = await fetch(`/projects/${this.project}/preview-test`, { method: 'POST' });
         const d = await r.json();
         if (!r.ok) { this.testError = d.error || 'Failed to start preview'; return; }
-        this.testTarget = d.target; this.testTuning = d.tuning;
+        this.testTarget = d.target; this.testTuning = d.tuning; this.testKind = 'generated';
         this.testing = true;
         // Cache-bust so the <img> opens a fresh MJPEG stream on the new camera.
         this.previewSrc = '/api/preview?t=' + Date.now();
       } catch (e) {
         this.testError = 'Preview request failed';
+      } finally {
+        this.busy = false;
+      }
+    },
+
+    genLabel() { return (this.runs[this.testTarget] || {}).label || ''; },
+
+    async previewStandard() {
+      // Switch the live preview to the camera's default (built-in) tuning, for
+      // an A/B against the generated one — stays in preview mode.
+      this.busy = true; this.testError = '';
+      this.previewSrc = '';  // close the stream before the camera restarts
+      try {
+        const r = await fetch('/api/preview-default', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.testError = d.error || 'Failed to load standard tuning'; return; }
+        this.testTuning = 'default (built-in)'; this.testTarget = null; this.testKind = 'standard';
+        this.testing = true;
+        this.previewSrc = '/api/preview?t=' + Date.now();
+      } catch (e) {
+        this.testError = 'Preview request failed';
+      } finally {
+        this.busy = false;
+      }
+    },
+
+    async capturePng() {
+      this.busy = true; this.testError = '';
+      try {
+        const r = await fetch(`/projects/${this.project}/preview-capture`);
+        if (!r.ok) { this.testError = 'Capture failed'; return; }
+        const blob = await r.blob();
+        const cd = r.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="?([^"]+)"?/);
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = m ? m[1] : 'preview.png';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(a.href);
+      } catch (e) {
+        this.testError = 'Capture request failed';
       } finally {
         this.busy = false;
       }
