@@ -29,11 +29,23 @@ _run_lock = threading.Lock()
 _SENTINEL = object()
 
 
+_CCM_MATRIX_SELECTIONS = ('average', 'maximum', 'patches')
+
+
 def build_config(options: dict) -> dict:
     """Build a CTT config dict from UI options (schema mirrors config_example.json)."""
     alsc = options.get('alsc', {})
     awb = options.get('awb', {})
     macbeth = options.get('macbeth', {})
+    ccm = options.get('ccm', {})
+    matrix_selection = ccm.get('matrix_selection', 'average')
+    if matrix_selection not in _CCM_MATRIX_SELECTIONS:
+        matrix_selection = 'average'
+    ccm_config: dict = {'matrix_selection': matrix_selection}
+    # test_patches only matters for the 'patches' selection; pass it through when given.
+    test_patches = ccm.get('test_patches')
+    if test_patches:
+        ccm_config['test_patches'] = [int(p) for p in test_patches]
     return {
         'disable': list(options.get('disable', [])),
         'plot': [],  # interactive matplotlib plots are not used in the web flow
@@ -48,6 +60,7 @@ def build_config(options: dict) -> dict:
             'small': int(bool(macbeth.get('small', 0))),
             'show': 0,  # never pop interactive windows from the server
         },
+        'ccm': ccm_config,
     }
 
 

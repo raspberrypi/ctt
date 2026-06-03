@@ -418,6 +418,8 @@ function runApp(cfg) {
     luminanceStrength: 0.8,
     maxGain: 8.0,
     blacklevel: -1,
+    matrixSelection: 'average',
+    testPatches: '1,2,5,8,9,12,14',
     running: false,
     done: false,
     exitCode: null,
@@ -435,6 +437,8 @@ function runApp(cfg) {
         luminance_strength: this.luminanceStrength,
         max_gain: this.maxGain,
         blacklevel: this.blacklevel,
+        matrix_selection: this.matrixSelection,
+        test_patches: this.matrixSelection === 'patches' ? this.testPatches : '',
       });
       this.source = new EventSource(`/projects/${this.project}/run/stream?${params}`);
       this.source.onmessage = (e) => {

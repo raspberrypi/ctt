@@ -117,6 +117,15 @@ def test_build_config_shape():
     assert cfg['alsc']['luminance_strength'] == 0.5
     assert cfg['blacklevel'] == 64
     assert cfg['macbeth']['show'] == 0  # never pop interactive windows
+    assert cfg['ccm']['matrix_selection'] == 'average'  # default
+
+
+def test_build_config_ccm_options():
+    cfg = ctt_runner.build_config({'ccm': {'matrix_selection': 'patches', 'test_patches': ['1', '5', '9']}})
+    assert cfg['ccm']['matrix_selection'] == 'patches'
+    assert cfg['ccm']['test_patches'] == [1, 5, 9]
+    # An unknown selection falls back to the safe default.
+    assert ctt_runner.build_config({'ccm': {'matrix_selection': 'bogus'}})['ccm']['matrix_selection'] == 'average'
 
 
 def test_run_stream_rejects_bad_target(tmp_path):

@@ -320,6 +320,10 @@ def create_app(workspace_root: str | None = None) -> Flask:
             },
             'blacklevel': int(request.args.get('blacklevel', -1)),
             'disable': [d for d in request.args.get('disable', '').split(',') if d],
+            'ccm': {
+                'matrix_selection': request.args.get('matrix_selection', 'average'),
+                'test_patches': [int(p) for p in request.args.get('test_patches', '').split(',') if p.strip()],
+            },
         }
 
         def generate():
