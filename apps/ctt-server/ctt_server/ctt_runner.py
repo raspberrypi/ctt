@@ -168,14 +168,15 @@ def run_ctt_stream(
         _run_lock.release()
 
 
-def output_files(project: Project, targets: list[str]) -> dict[str, dict[str, str | None]]:
-    """Return produced output paths keyed by target: {target: {json, log}}."""
-    out: dict[str, dict[str, str | None]] = {}
+def output_files(project: Project, targets: list[str]) -> dict[str, dict[str, str | float | None]]:
+    """Return produced output paths + mtime keyed by target: {target: {json, log, mtime}}."""
+    out: dict[str, dict[str, str | float | None]] = {}
     for target in targets:
         json_path = project.output_dir / f'{project.name}_{target}.json'
         log_path = project.output_dir / f'{project.name}_{target}.log'
         out[target] = {
             'json': str(json_path) if json_path.exists() else None,
             'log': str(log_path) if log_path.exists() else None,
+            'mtime': json_path.stat().st_mtime if json_path.exists() else None,
         }
     return out

@@ -111,6 +111,17 @@ def test_session_delete_capture(tmp_path):
     assert not list(proj.path.glob('*.dng'))
 
 
+def test_output_files_reports_mtime(tmp_path):
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('cam')
+    proj.output_dir.mkdir(parents=True, exist_ok=True)
+    (proj.output_dir / 'cam_pisp.json').write_text('{}')
+    out = ctt_runner.output_files(proj, ['pisp', 'vc4'])
+    assert out['pisp']['json'] is not None
+    assert isinstance(out['pisp']['mtime'], float)  # present for the existing target
+    assert out['vc4']['json'] is None and out['vc4']['mtime'] is None  # absent target
+
+
 def test_build_config_shape():
     cfg = ctt_runner.build_config({'awb': {'greyworld': True}, 'alsc': {'luminance_strength': 0.5}, 'blacklevel': 64})
     assert cfg['awb']['greyworld'] == 1
