@@ -86,18 +86,42 @@ class Picamera2Camera:
             _RAW_SIZE_CACHE[self.model] = raw_size
         sensor_w, sensor_h = raw_size
         self.resolution = (sensor_w, sensor_h)
+        self._raw_size = raw_size
         # Preview derived from the full-res frame, scaled down preserving aspect.
         prev_w = min(preview_max_width, sensor_w) & ~1
         prev_h = int(round(prev_w * sensor_h / sensor_w)) & ~1
-        config = self._picam2.create_video_configuration(
-            main={'size': (prev_w, prev_h), 'format': 'RGB888'},
-            raw={'size': raw_size},
-            buffer_count=4,
-        )
-        self._picam2.configure(config)
+        self._preview_size = (prev_w, prev_h)
+        # Sensor flip (applied at configure time via a libcamera Transform); affects
+        # both the live preview and the captured raw/DNG/PNG.
+        self._hflip = False
+        self._vflip = False
+        self._picam2.configure(self._video_config())
         self._picam2.start()
         # Allow auto-exposure to settle before the first frame.
         time.sleep(0.5)
+
+    def _transform(self):
+        from libcamera import Transform  # noqa: PLC0415 (lazy; Pi-only)
+
+        return Transform(hflip=1 if self._hflip else 0, vflip=1 if self._vflip else 0)
+
+    def _video_config(self):
+        return self._picam2.create_video_configuration(
+            main={'size': self._preview_size, 'format': 'RGB888'},
+            raw={'size': self._raw_size},
+            transform=self._transform(),
+            buffer_count=4,
+        )
+
+    def set_transform(self, hflip: bool, vflip: bool) -> dict:
+        """Set the sensor h/v flip and reconfigure the live pipeline immediately."""
+        with self._lock:
+            self._hflip, self._vflip = bool(hflip), bool(vflip)
+            self._picam2.stop()
+            self._picam2.configure(self._video_config())
+            self._picam2.start()
+        time.sleep(0.3)  # let the pipeline settle before the next frame is served
+        return {'hflip': self._hflip, 'vflip': self._vflip}
 
     # --- controls ----------------------------------------------------------
     def get_controls(self) -> dict:
@@ -155,7 +179,10 @@ class Picamera2Camera:
         import cv2  # noqa: PLC0415
 
         with self._lock:
-            still = self._picam2.create_still_configuration(main={'size': self.resolution, 'format': 'RGB888'})
+            still = self._picam2.create_still_configuration(
+                main={'size': self.resolution, 'format': 'RGB888'},
+                transform=self._transform(),
+            )
             arr = self._picam2.switch_mode_and_capture_array(still, 'main')
         # Picamera2 'RGB888' arrays are BGR-ordered, which is exactly what cv2 wants.
         ok, buf = cv2.imencode('.png', arr)
@@ -289,6 +316,8 @@ class Picamera2Camera:
             'resolution': list(self.resolution),
             'controls': self.get_controls(),
             'tuning': os.path.basename(self.tuning_file) if self.tuning_file else None,
+            'hflip': self._hflip,
+            'vflip': self._vflip,
         }
 
     def close(self) -> None:

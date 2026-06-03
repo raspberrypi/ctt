@@ -186,6 +186,11 @@ def create_app(workspace_root: str | None = None) -> Flask:
     def api_set_controls():
         return jsonify(camera_or_503().set_controls(request.get_json(force=True) or {}))
 
+    @app.route('/api/transform', methods=['POST'])
+    def api_transform():
+        body = request.get_json(force=True) or {}
+        return jsonify(camera_or_503().set_transform(bool(body.get('hflip')), bool(body.get('vflip'))))
+
     @app.route('/api/histogram')
     def api_histogram():
         return jsonify(camera_or_503().histogram())
