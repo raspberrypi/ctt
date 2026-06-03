@@ -109,3 +109,56 @@ class TestImageGetPatches:
         coords = [[[10, 10], [30, 30], [50, 50]]]
         img.get_patches(coords)
         assert len(img.patches[0]) == 3
+
+
+# --- metrics sidecar (runner._write_metrics) ---
+
+
+class TestWriteMetrics:
+    def _make_cam(self):
+        import types
+
+        from ctt.core.camera import Camera
+
+        cam = Camera(
+            'cam_pisp.json',
+            json={
+                'rpi.awb': {'ct_curve': [2500, 0.8, 0.5, 5000, 0.6, 0.7, 7000, 0.5, 0.9]},
+                'rpi.ccm': {'ccms': [{'ct': 2500, 'ccm': [1] * 9}, {'ct': 5000, 'ccm': [1] * 9}]},
+            },
+        )
+        cam.imgs = [types.SimpleNamespace(col=2500), types.SimpleNamespace(col=7000)]
+        cam.imgs_alsc = [types.SimpleNamespace(col=5000)]
+        cam.imgs_cac = []
+        cam.metrics['ccm'].append({'ct': 2500, 'max_after': 2.0})
+        return cam
+
+    def test_sidecar_written_with_counts_and_coverage(self, tmp_path):
+        import json
+
+        from ctt.core import runner
+
+        cam = self._make_cam()
+        out = tmp_path / 'cam_pisp.json'
+        runner._write_metrics(cam, str(out), target='pisp', mode='Full', config={'max_gain': 8.0})
+
+        sidecar = tmp_path / 'cam_pisp_metrics.json'
+        assert sidecar.exists()
+        data = json.loads(sidecar.read_text())
+        assert data['counts'] == {'macbeth': 2, 'alsc': 1, 'cac': 0}
+        assert data['coverage']['ct_min'] == 2500
+        assert data['coverage']['ct_max'] == 7000
+        assert data['coverage']['ccm_matrices'] == 2
+        assert data['coverage']['awb_points'] == 3
+        assert data['config']['max_gain'] == 8.0
+        assert data['target'] == 'pisp'
+        assert data['ccm'] == [{'ct': 2500, 'max_after': 2.0}]
+
+    def test_sidecar_never_raises_on_bad_output_path(self, tmp_path):
+        from ctt.core import runner
+
+        cam = self._make_cam()
+        # An unwritable directory must be swallowed, not propagated.
+        bad = tmp_path / 'no_such_dir' / 'cam_pisp.json'
+        runner._write_metrics(cam, str(bad), target='pisp', mode='Full', config={})
+        assert not bad.parent.exists()
