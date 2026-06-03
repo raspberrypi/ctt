@@ -212,6 +212,22 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .stat .n { font-size: 1.6rem; font-weight: 700; }
 .stat .l { color: var(--text-dim); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
 
+/* --- calibration metrics --- */
+/* Chart.js responsive container: a relatively-positioned box with a fixed
+   height; Chart.js sizes the <canvas> inside it (maintainAspectRatio:false). */
+.chart-box { position: relative; height: 260px; }
+.qbadge { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-dim); }
+.qbadge.good { color: var(--ok); border-color: rgba(47,179,68,0.5); background: rgba(47,179,68,0.1); }
+.qbadge.fair { color: var(--warn); border-color: rgba(241,162,4,0.5); background: rgba(241,162,4,0.1); }
+.qbadge.poor { color: var(--err); border-color: rgba(229,72,77,0.5); background: rgba(229,72,77,0.1); }
+.warnrow { display: flex; align-items: baseline; gap: 8px; font-size: 0.88rem; padding: 6px 0;
+  border-bottom: 1px solid var(--border); }
+.warnrow:last-child { border-bottom: 0; }
+.warnrow .ic { font-weight: 700; }
+.warnrow.warn .ic { color: var(--warn); }
+.warnrow.error .ic { color: var(--err); }
+
 /* --- log console --- */
 .console {
   background: #0a0d12; border: 1px solid var(--border); border-radius: var(--radius);
