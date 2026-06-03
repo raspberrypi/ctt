@@ -28,6 +28,17 @@
     </div>
 
     <div class="field">
+      <label>Black level (-1 auto)</label>
+      <input type="number" x-model.number="blacklevel" min="-1" max="65535" step="1">
+    </div>
+
+    <div class="divider"></div>
+    <h3>AWB &amp; CCM</h3>
+
+    <label class="flex" style="margin:10px 0 12px;font-weight:600">
+      <input type="checkbox" style="width:auto" x-model="greyworld"> Grey-world AWB (instead of Macbeth-based)
+    </label>
+    <div class="field">
       <label>CCM optimisation</label>
       <div class="seg">
         <button type="button" :class="{active: matrixSelection==='average'}" @click="matrixSelection='average'">Average ΔE</button>
@@ -42,26 +53,19 @@
     </div>
 
     <div class="divider"></div>
+    <h3>ALSC (lens shading)</h3>
 
-    <label class="flex" style="margin-bottom:12px;font-weight:600">
-      <input type="checkbox" style="width:auto" x-model="greyworld"> Grey-world AWB (instead of Macbeth-based)
-    </label>
-    <label class="flex" style="margin-bottom:12px;font-weight:600">
+    <label class="flex" style="margin:10px 0 12px;font-weight:600">
       <input type="checkbox" style="width:auto" x-model="doAlscColour"> ALSC colour shading
     </label>
-
     <div class="field-row">
       <div class="field">
-        <label>ALSC luminance strength</label>
+        <label>Luminance strength</label>
         <input type="number" x-model.number="luminanceStrength" min="0" max="1" step="0.05">
       </div>
       <div class="field">
-        <label>ALSC max gain</label>
+        <label>Max gain</label>
         <input type="number" x-model.number="maxGain" min="1" max="16" step="0.5">
-      </div>
-      <div class="field">
-        <label>Black level (-1 auto)</label>
-        <input type="number" x-model.number="blacklevel" min="-1" max="65535" step="1">
       </div>
     </div>
 

@@ -486,6 +486,8 @@ function resultsApp(cfg) {
     charts: {},
     metrics: null,
     ccmCt: null,          // selected colour temp for the per-patch ΔE chart
+    runs: cfg.runs || {}, // target -> {label, epoch}: when each tuning file was generated
+    autoPreview: cfg.autoPreview || false,  // Preview page: start the live test on load
     _charts: {},
     // live preview test
     busy: false,
@@ -495,7 +497,10 @@ function resultsApp(cfg) {
     previewSrc: '',
     testError: '',
 
-    init() { this.select(this.target); },
+    init() {
+      this.select(this.target);
+      if (this.autoPreview) this.startPreviewTest();  // Preview page: kick off the live test
+    },
 
     async startPreviewTest() {
       this.busy = true; this.testError = '';
@@ -532,8 +537,10 @@ function resultsApp(cfg) {
       this.summary = data.summary;
       this.charts = data.charts || {};
       this.metrics = data.metrics || null;
-      const ccm = this.metrics && this.metrics.ccm;
-      this.ccmCt = (ccm && ccm.length) ? ccm[0].ct : null;
+      // Keep the selected colour temperature across a target switch when the new
+      // target also has it; otherwise fall back to its first CT.
+      const cts = ((this.metrics && this.metrics.ccm) || []).map((c) => c.ct);
+      if (!cts.includes(this.ccmCt)) this.ccmCt = cts.length ? cts[0] : null;
       // Wait for Alpine to apply x-show/x-if, then a layout frame, so each
       // canvas's container has its final size before Chart.js measures it.
       this.$nextTick(() => requestAnimationFrame(() => this.renderCharts()));
@@ -570,6 +577,12 @@ function resultsApp(cfg) {
       const c = this.metrics && this.metrics.coverage;
       if (!c || c.ct_min == null || c.ct_max == null) return '–';
       return c.ct_min === c.ct_max ? `${c.ct_min}` : `${c.ct_min}–${c.ct_max}`;
+    },
+    runLabel() { return (this.runs[this.target] || {}).label || ''; },
+    runsMismatch() {
+      // Warn when the per-target tuning files are from runs > 2 min apart (one is stale).
+      const ep = Object.values(this.runs).map((r) => r.epoch).filter((e) => e != null);
+      return ep.length > 1 && (Math.max(...ep) - Math.min(...ep)) > 120;
     },
 
     renderCharts() {

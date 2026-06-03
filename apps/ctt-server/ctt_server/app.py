@@ -9,6 +9,7 @@
 
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from flask import (
@@ -38,6 +39,16 @@ from .naming import NamingError, validate_filename
 from .sessions import Project, Workspace
 
 logger = logging.getLogger(__name__)
+
+
+def _run_info(available: dict) -> dict:
+    """Map target -> {label, epoch} from each tuning file's mtime, for the UI."""
+    info = {}
+    for target, f in available.items():
+        mtime = f.get('mtime')
+        if mtime:
+            info[target] = {'label': datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M'), 'epoch': int(mtime)}
+    return info
 
 
 def _serialise_captures(project: Project) -> list[dict]:
@@ -342,14 +353,14 @@ def create_app(workspace_root: str | None = None) -> Flask:
         proj = get_project_or_404(name)
         files = ctt_runner.output_files(proj, ['pisp', 'vc4'])
         available = {t: f for t, f in files.items() if f['json']}
-        return render_template('results.html', project=proj, files=available)
+        return render_template('results.html', project=proj, files=available, runs=_run_info(available))
 
     @app.route('/projects/<name>/tuning')
     def tuning_page(name: str):
         proj = get_project_or_404(name)
         files = ctt_runner.output_files(proj, ['pisp', 'vc4'])
         available = {t: f for t, f in files.items() if f['json']}
-        return render_template('tuning.html', project=proj, files=available)
+        return render_template('tuning.html', project=proj, files=available, runs=_run_info(available))
 
     @app.route('/projects/<name>/preview')
     def preview_page(name: str):

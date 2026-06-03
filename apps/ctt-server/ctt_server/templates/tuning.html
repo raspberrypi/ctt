@@ -8,7 +8,7 @@
   <div class="card"><div class="empty"><div class="big">📄</div>No tuning files yet.
     <a href="{{ url_for('run_page', name=project.name) }}">Run CTT</a> to generate them.</div></div>
 {% else %}
-<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }} })' x-init="init()">
+<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, runs: {{ runs|tojson }} })' x-init="init()">
   <!-- Tuning files -->
   <div class="card">
     <div class="card-head">
@@ -19,6 +19,8 @@
         </template>
       </div>
     </div>
+    <div class="muted" x-show="runLabel()" x-cloak>Generated <span x-text="runLabel()"></span></div>
+    <div class="banner info mt" x-show="runsMismatch()" x-cloak>⚠ PiSP and VC4 were generated at different times — re-run to refresh both.</div>
     <div class="btn-row">
       <a class="btn primary" :href="'/projects/{{ project.name }}/download/json/'+target">⬇ Download JSON</a>
       <a class="btn" :href="'/projects/{{ project.name }}/download/log/'+target">⬇ Download log</a>

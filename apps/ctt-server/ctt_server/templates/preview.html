@@ -8,7 +8,7 @@
   <div class="card"><div class="empty"><div class="big">📄</div>No tuning files yet.
     <a href="{{ url_for('run_page', name=project.name) }}">Run CTT</a> to generate a tuning to preview.</div></div>
 {% else %}
-<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }} })' x-init="init()">
+<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, autoPreview: true })' x-init="init()">
   <!-- Live preview test -->
   <div class="card">
     <div class="card-head"><h2>Live preview test</h2></div>
