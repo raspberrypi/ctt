@@ -31,13 +31,27 @@ def _deltae_band(value: float | None) -> str | None:
 
 
 def _ccm_quality(ccm_list: list) -> dict:
-    """Summarise per-CT CCM delta E into headline numbers + a quality band."""
-    maxes = [c['max_after'] for c in ccm_list if isinstance(c, dict) and c.get('max_after') is not None]
-    if not maxes:
-        return {}
-    worst = max(maxes)
-    mean = sum(maxes) / len(maxes)
-    return {'mean_max': mean, 'worst_max': worst, 'band': _deltae_band(worst)}
+    """Summarise CCM delta E into a headline mean/worst + a quality band.
+
+    The band is driven by the *mean* per-patch delta E, not the worst patch: a
+    few out-of-gamut patches (saturated blues/cyans) sit high on any good 3x3
+    calibration, so worst-case would peg every result to 'poor'. Worst is still
+    reported as a secondary figure.
+    """
+    entries = [c for c in ccm_list if isinstance(c, dict)]
+    all_de = [p['de'] for c in entries for p in c.get('patches', []) if 'de' in p]
+    if all_de:
+        mean = sum(all_de) / len(all_de)
+        worst = max(all_de)
+    else:
+        # Older sidecars without per-patch data: fall back to the per-CT figures.
+        metrics = [c['metric_after'] for c in entries if c.get('metric_after') is not None]
+        maxes = [c['max_after'] for c in entries if c.get('max_after') is not None]
+        if not metrics and not maxes:
+            return {}
+        mean = (sum(metrics) / len(metrics)) if metrics else (sum(maxes) / len(maxes))
+        worst = max(maxes) if maxes else mean
+    return {'mean': mean, 'worst': worst, 'band': _deltae_band(mean)}
 
 
 def _alsc_falloff(grid: list) -> dict:

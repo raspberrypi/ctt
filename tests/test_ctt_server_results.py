@@ -39,16 +39,30 @@ def test_deltae_banding():
     assert results._deltae_band(None) is None
 
 
-def test_ccm_quality_summary():
+def test_ccm_quality_band_from_mean():
+    # Band is driven by the mean patch ΔE (3.33 → 'fair'), not the worst patch
+    # (7.0, which alone would read 'poor').
     q = results._ccm_quality(
         [
-            {'ct': 2500, 'max_after': 2.0},
-            {'ct': 5000, 'max_after': 4.0},
+            {'ct': 2500, 'max_after': 7.0, 'patches': [{'de': 1.0}, {'de': 2.0}, {'de': 7.0}]},
         ]
     )
-    assert q['worst_max'] == 4.0
-    assert q['mean_max'] == 3.0
-    assert q['band'] == 'fair'  # driven by the worst CT
+    assert round(q['mean'], 2) == 3.33
+    assert q['worst'] == 7.0
+    assert q['band'] == 'fair'
+
+
+def test_ccm_quality_fallback_without_patches():
+    # Older sidecars (no per-patch data) fall back to the per-CT metric_after.
+    q = results._ccm_quality(
+        [
+            {'ct': 2500, 'metric_after': 1.2, 'max_after': 2.5},
+            {'ct': 5000, 'metric_after': 2.0, 'max_after': 5.0},
+        ]
+    )
+    assert q['mean'] == 1.6  # mean of metric_after
+    assert q['worst'] == 5.0
+    assert q['band'] == 'good'
 
 
 def test_alsc_falloff():
@@ -104,9 +118,9 @@ def test_parse_with_sidecar(tmp_path):
     m = out['metrics']
     # CCM list sorted by CT for stable charting.
     assert [c['ct'] for c in m['ccm']] == [2500, 5000]
-    # Quality band driven by the worst max_after (5.0 → poor on the ΔE₀₀ scale).
-    assert m['ccm_quality']['worst_max'] == 5.0
-    assert m['ccm_quality']['band'] == 'poor'
+    # Band is driven by the mean (metric_after 1.2/2.0 → 1.6 → 'good'); worst is secondary.
+    assert m['ccm_quality']['worst'] == 5.0
+    assert m['ccm_quality']['band'] == 'good'
     assert m['warnings'][0]['message'] == 'Image too dark'
     assert m['counts']['macbeth'] == 5
     assert m['coverage']['ct_max'] == 7000
