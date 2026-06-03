@@ -185,6 +185,10 @@ def run_ctt(
             logger.info('Mono sensor: disabling AWB and CCM in output.')
             disable = set(disable) | {'rpi.awb', 'rpi.ccm'}
             cam.disable = disable
+        # Report the black level actually in use now that the DNGs have been read
+        # (the config summary above only shows the -1 'auto' flag, not the value).
+        bl_source = 'auto, from DNG' if blacklevel == -1 else 'override'
+        logger.info(f'Black level: {cam.blacklevel_16} ({bl_source})')
         if not alsc_only:
             cam.json['rpi.black_level']['black_level'] = cam.blacklevel_16
         # When updating a file in-place with --alsc-only or --colour-only, keep all
