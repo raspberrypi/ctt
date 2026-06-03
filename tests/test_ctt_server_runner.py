@@ -6,7 +6,9 @@
 
 import json
 
-from ctt_server import ctt_runner, sessions
+import pytest
+
+from ctt_server import ctt_runner, naming, sessions
 
 
 def test_session_add_and_count(tmp_path):
@@ -50,6 +52,54 @@ def test_load_heals_duplicate_filenames(tmp_path):
 
     reloaded = ws.get_project('imx-test')
     assert reloaded.counts()['macbeth'] == 1
+
+
+def test_import_capture_auto_tags(tmp_path):
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('imx-test')
+    mac = proj.import_capture('d65_5000k_800l.dng', b'MAC')
+    alsc = proj.import_capture('alsc_3000k_0.dng', b'ALSC')
+
+    assert (mac.image_type, mac.colour_temp, mac.lux, mac.label) == ('macbeth', 5000, 800, 'd65')
+    assert (alsc.image_type, alsc.colour_temp, alsc.lux) == ('alsc', 3000, None)
+    # Stored under the original (auto-tagged) filename, bytes preserved.
+    assert (proj.path / 'd65_5000k_800l.dng').read_bytes() == b'MAC'
+    assert proj.counts() == {'macbeth': 1, 'alsc': 1, 'cac': 0}
+
+
+def test_import_capture_normalises_extension_case(tmp_path):
+    proj = sessions.Workspace(tmp_path).create_project('p')
+    cap = proj.import_capture('alsc_5000k_1.DNG', b'X')
+    assert cap.filename == 'alsc_5000k_1.dng'
+
+
+def test_import_capture_rejects_untagged(tmp_path):
+    proj = sessions.Workspace(tmp_path).create_project('p')
+    with pytest.raises(naming.NamingError):
+        proj.import_capture('random.dng', b'X')
+    assert proj.counts()['macbeth'] == 0
+
+
+def test_upload_route_auto_tags_and_skips(tmp_path):
+    from io import BytesIO
+
+    from ctt_server.app import create_app
+
+    sessions.Workspace(tmp_path).create_project('cam')
+    client = create_app(str(tmp_path)).test_client()
+    data = {
+        'files': [
+            (BytesIO(b'MAC'), 'd65_5000k_800l.dng'),
+            (BytesIO(b'BAD'), 'oops.dng'),
+        ]
+    }
+    r = client.post('/projects/cam/upload', data=data, content_type='multipart/form-data')
+    assert r.status_code == 200
+    body = r.get_json()
+    assert [a['filename'] for a in body['added']] == ['d65_5000k_800l.dng']
+    assert body['added'][0]['colour_temp'] == 5000
+    assert [s['filename'] for s in body['skipped']] == ['oops.dng']
+    assert body['counts']['macbeth'] == 1
 
 
 def test_session_delete_capture(tmp_path):

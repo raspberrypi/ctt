@@ -143,6 +143,33 @@ class Project:
         self.save()
         return capture
 
+    def import_capture(self, filename: str, data: bytes) -> Capture:
+        """Register an uploaded image, auto-tagging from its CTT-format filename.
+
+        The file is stored under its own (sanitised) name — it is assumed to
+        already follow the CTT convention. Raises naming.NamingError if the name
+        cannot be parsed into valid tags.
+        """
+        # Strip any path and normalise a .dng extension to lowercase so names
+        # like FOO_5000K_800L.DNG still parse via CTT's (lowercase) extension regex.
+        name = Path(filename).name
+        stem, dot, ext = name.rpartition('.')
+        if dot and ext.lower() == 'dng':
+            name = f'{stem}.dng'
+
+        image_type, colour_temp, lux, label = naming.parse_filename(name)
+        self.path.mkdir(parents=True, exist_ok=True)
+        (self.path / name).write_bytes(data)
+        capture = Capture(filename=name, image_type=image_type, colour_temp=colour_temp, lux=lux, label=label)
+        # Overwrite-in-place on a repeat upload of the same filename (matches add_capture).
+        existing = next((i for i, c in enumerate(self.captures) if c.filename == name), None)
+        if existing is not None:
+            self.captures[existing] = capture
+        else:
+            self.captures.append(capture)
+        self.save()
+        return capture
+
     def delete_capture(self, filename: str) -> None:
         target = self.path / filename
         if target.exists() and target.suffix == '.dng':

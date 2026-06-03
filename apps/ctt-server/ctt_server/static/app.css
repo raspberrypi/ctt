@@ -130,7 +130,7 @@ h3 { font-size: 0.95rem; color: var(--text-dim); text-transform: uppercase; lett
 }
 .btn:hover { background: #2a3343; border-color: #46546b; }
 .btn:active { transform: translateY(1px); }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:disabled, .btn.disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary:hover { filter: brightness(1.07); }
 .btn.ghost { background: transparent; border-color: var(--border); }

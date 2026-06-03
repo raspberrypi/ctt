@@ -158,7 +158,14 @@
   <div class="card mt">
     <div class="card-head">
       <h2>Captured images (<span x-text="captures.length"></span>)</h2>
+      <label class="btn ghost" :class="{ disabled: busy }">
+        <span x-text="busy ? 'Uploading…' : '⬆ Upload images'"></span>
+        <input type="file" multiple accept=".dng" @change="uploadFiles($event)" :disabled="busy" hidden>
+      </label>
     </div>
+    <p class="hint">Upload existing <code>.dng</code> files — they're auto-tagged from the filename
+      (<code>&lt;label&gt;_&lt;K&gt;k_&lt;lux&gt;l.dng</code>, <code>alsc_&lt;K&gt;k_&lt;n&gt;.dng</code>, <code>cac_&lt;K&gt;k_&lt;n&gt;.dng</code>).</p>
+    <div class="banner error mt" x-show="uploadMsg" x-text="uploadMsg" x-cloak></div>
     <div class="shot-grid" x-show="captures.length">
       <template x-for="c in captures" :key="c.filename">
         <div class="shot" :class="{invalid: !c.valid}">

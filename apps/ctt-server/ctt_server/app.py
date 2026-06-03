@@ -34,7 +34,7 @@ from .camera import (
     platform_target,
     reload_shared_camera,
 )
-from .naming import validate_filename
+from .naming import NamingError, validate_filename
 from .sessions import Project, Workspace
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,8 @@ def _serialise_captures(project: Project) -> list[dict]:
 def create_app(workspace_root: str | None = None) -> Flask:
     app = Flask(__name__)
     app.config['WORKSPACE'] = Workspace(workspace_root)
+    # Allow large raw-image uploads (DNGs are tens of MB; a batch can be large).
+    app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024
 
     def workspace() -> Workspace:
         return app.config['WORKSPACE']
@@ -264,6 +266,33 @@ def create_app(workspace_root: str | None = None) -> Flask:
                 'counts': proj.counts(),
             }
         )
+
+    @app.route('/projects/<name>/upload', methods=['POST'])
+    def upload(name: str):
+        """Import custom image files, auto-tagging each from its CTT-format filename."""
+        proj = get_project_or_404(name)
+        files = request.files.getlist('files')
+        if not files:
+            return jsonify({'error': 'No files uploaded'}), 400
+        added, skipped = [], []
+        for f in files:
+            if not f or not f.filename:
+                continue
+            try:
+                cap = proj.import_capture(f.filename, f.read())
+                added.append(
+                    {
+                        'filename': cap.filename,
+                        'image_type': cap.image_type,
+                        'colour_temp': cap.colour_temp,
+                        'lux': cap.lux,
+                        'label': cap.label,
+                        'valid': True,
+                    }
+                )
+            except NamingError as err:
+                skipped.append({'filename': f.filename, 'reason': str(err)})
+        return jsonify({'added': added, 'skipped': skipped, 'counts': proj.counts()})
 
     @app.route('/projects/<name>/captures/<filename>/delete', methods=['POST'])
     def delete_capture(name: str, filename: str):

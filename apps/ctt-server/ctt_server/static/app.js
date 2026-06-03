@@ -131,6 +131,7 @@ function captureApp(cfg) {
     lightbox: { present: false, channel: null, illuminant: '', intensity: 0, illuminants: {} },
     busy: false,
     error: '',
+    uploadMsg: '',
 
     async init() {
       this.updateCounts();
@@ -317,6 +318,37 @@ function captureApp(cfg) {
         this.updateCounts();
       } catch (e) {
         this.error = 'Capture request failed';
+      } finally {
+        this.busy = false;
+      }
+    },
+
+    async uploadFiles(e) {
+      const files = Array.from(e.target.files || []);
+      e.target.value = '';  // let the same file be re-selected later
+      if (!files.length) return;
+      this.uploadMsg = '';
+      this.busy = true;
+      try {
+        const fd = new FormData();
+        for (const f of files) fd.append('files', f);
+        const r = await fetch(`/projects/${this.project}/upload`, { method: 'POST', body: fd });
+        const d = await r.json();
+        if (!r.ok) { this.uploadMsg = d.error || 'Upload failed'; return; }
+        for (const entry of (d.added || [])) {
+          const idx = this.captures.findIndex((c) => c.filename === entry.filename);
+          if (idx >= 0) this.captures.splice(idx, 1, entry);
+          else this.captures.unshift(entry);
+        }
+        this.updateCounts();
+        const parts = [];
+        if (d.added && d.added.length) parts.push(`Added ${d.added.length}.`);
+        if (d.skipped && d.skipped.length) {
+          parts.push('Skipped: ' + d.skipped.map((s) => `${s.filename} (${s.reason})`).join('; '));
+        }
+        this.uploadMsg = parts.join(' ');
+      } catch (e) {
+        this.uploadMsg = 'Upload request failed';
       } finally {
         this.busy = false;
       }
