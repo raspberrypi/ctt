@@ -39,21 +39,26 @@ def test_deltae_banding():
     assert results._deltae_band(None) is None
 
 
-def test_ccm_quality_band_from_mean():
-    # Band is driven by the mean patch ΔE (3.33 → 'fair'), not the worst patch
-    # (7.0, which alone would read 'poor').
+def test_ccm_quality_band_from_colour():
+    # Band grades on the brightness-normalised colour ΔE (de_norm), not raw de:
+    # here colour 2.0 → 'good' even though raw mean (6.0) alone would read 'poor'.
     q = results._ccm_quality(
         [
-            {'ct': 2500, 'max_after': 7.0, 'patches': [{'de': 1.0}, {'de': 2.0}, {'de': 7.0}]},
+            {
+                'ct': 2500,
+                'patches': [{'de': 5.0, 'de_norm': 1.5}, {'de': 6.0, 'de_norm': 2.0}, {'de': 7.0, 'de_norm': 2.5}],
+            },
         ]
     )
-    assert round(q['mean'], 2) == 3.33
+    assert q['mean'] == 6.0
     assert q['worst'] == 7.0
-    assert q['band'] == 'fair'
+    assert q['colour'] == 2.0  # mean of de_norm
+    assert q['band'] == 'good'
 
 
 def test_ccm_quality_fallback_without_patches():
-    # Older sidecars (no per-patch data) fall back to the per-CT metric_after.
+    # Older sidecars (no per-patch data) fall back to the per-CT metric_after,
+    # and colour falls back to the raw mean.
     q = results._ccm_quality(
         [
             {'ct': 2500, 'metric_after': 1.2, 'max_after': 2.5},
@@ -62,6 +67,7 @@ def test_ccm_quality_fallback_without_patches():
     )
     assert q['mean'] == 1.6  # mean of metric_after
     assert q['worst'] == 5.0
+    assert q['colour'] == 1.6
     assert q['band'] == 'good'
 
 

@@ -548,10 +548,14 @@ function resultsApp(cfg) {
     ccmHasPatches() { return ((this.metrics && this.metrics.ccm) || []).some((c) => c.patches && c.patches.length); },
     ccmStats() {
       const e = this.ccmEntry();
-      if (!e) return { mean: null, worst: null };
+      if (!e) return { mean: null, worst: null, colour: null };
       const de = (e.patches || []).map((p) => p.de);
-      if (de.length) return { mean: de.reduce((a, b) => a + b, 0) / de.length, worst: Math.max(...de) };
-      return { mean: e.metric_after, worst: e.max_after };  // legacy fallback
+      const dn = (e.patches || []).map((p) => p.de_norm).filter((v) => v != null);
+      const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+      if (de.length) {
+        return { mean: avg(de), worst: Math.max(...de), colour: dn.length ? avg(dn) : null };
+      }
+      return { mean: e.metric_after, worst: e.max_after, colour: null };  // legacy fallback
     },
     setCcmCt(ct) {
       this.ccmCt = ct;
