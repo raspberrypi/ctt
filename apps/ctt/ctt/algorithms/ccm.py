@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 import colour.models
 import numpy as np
 from colour.difference import delta_E_CIE2000
-from scipy.optimize import minimize
+from scipy.optimize import minimize, minimize_scalar
 
 from ..detection.patches import get_alsc_patches
 from ..output.visualise import visualise_macbeth_chart
@@ -264,7 +264,21 @@ def ccm(
         # 'patches' is the post-optimisation delta E per Macbeth patch, paired
         # with the patch's reference sRGB colour (0-255) for colour-coded bars.
         de_after = deltae_array(after_gamma_lab, m_lab)
-        patches = [{'de': float(d), 'rgb': [int(v) for v in rgb]} for d, rgb in zip(de_after, m_rgb, strict=True)]
+
+        # 'de_norm' is the delta E after removing the overall-brightness offset
+        # (the optimal global scale on the linear output). The CCM rows sum to 1
+        # so it carries no brightness — absolute lightness is set downstream by
+        # AEC/tone — so de_norm reflects the hue/saturation accuracy the matrix
+        # actually controls, without the calibration's lightness-match artifact.
+        def _norm_mean_de(s, arr=after_optimised_rgb_arr, ref=m_lab):
+            return float(np.mean(deltae_array(rgb_to_lab(s * arr), ref)))
+
+        s_opt = minimize_scalar(_norm_mean_de, bounds=(0.5, 1.6), method='bounded').x
+        de_norm = deltae_array(rgb_to_lab(s_opt * after_optimised_rgb_arr), m_lab)
+        patches = [
+            {'de': float(d), 'de_norm': float(dn), 'rgb': [int(v) for v in rgb]}
+            for d, dn, rgb in zip(de_after, de_norm, m_rgb, strict=True)
+        ]
         cam.metrics['ccm'].append(
             {
                 'ct': img.col,

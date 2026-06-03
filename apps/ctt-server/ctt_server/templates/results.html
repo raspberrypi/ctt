@@ -34,6 +34,7 @@
           </div>
           <template x-if="metrics.ccm.length">
             <div class="stats">
+              <div class="stat" x-show="ccmStats().colour !== null"><div class="n" x-text="fmt(ccmStats().colour)"></div><div class="l">Colour ΔE</div></div>
               <div class="stat"><div class="n" x-text="fmt(ccmStats().mean)"></div><div class="l">Mean ΔE</div></div>
               <div class="stat"><div class="n" x-text="fmt(ccmStats().worst)"></div><div class="l">Worst ΔE</div></div>
             </div>
@@ -45,7 +46,7 @@
           </div>
           <div class="chart-box mt" x-show="metrics.ccm.length"><canvas id="ccmChart"></canvas></div>
           <p class="muted mt" x-show="!metrics.ccm.length" x-cloak>No CCM data (greyscale sensor or CCM disabled).</p>
-          <p class="hint">Delta E (CIE2000) per Macbeth patch after matrix optimisation, at the selected colour temperature — each bar is the patch's reference colour; lower is better.</p>
+          <p class="hint">Delta E (CIE2000) per Macbeth patch after matrix optimisation, at the selected colour temperature — each bar is the patch's reference colour; lower is better. <b>Colour ΔE</b> removes the overall-brightness offset (set at runtime by exposure/tone), so it reflects the hue/saturation accuracy the matrix actually controls; the badge is graded on it.</p>
         </div>
 
         <!-- Health -->

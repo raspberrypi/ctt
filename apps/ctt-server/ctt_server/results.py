@@ -40,9 +40,13 @@ def _ccm_quality(ccm_list: list) -> dict:
     """
     entries = [c for c in ccm_list if isinstance(c, dict)]
     all_de = [p['de'] for c in entries for p in c.get('patches', []) if 'de' in p]
+    all_norm = [p['de_norm'] for c in entries for p in c.get('patches', []) if 'de_norm' in p]
     if all_de:
         mean = sum(all_de) / len(all_de)
         worst = max(all_de)
+        # Brightness-normalised "colour" ΔE: the honest hue/saturation figure the
+        # band is graded on (falls back to raw mean for sidecars without it).
+        colour = (sum(all_norm) / len(all_norm)) if all_norm else mean
     else:
         # Older sidecars without per-patch data: fall back to the per-CT figures.
         metrics = [c['metric_after'] for c in entries if c.get('metric_after') is not None]
@@ -51,7 +55,8 @@ def _ccm_quality(ccm_list: list) -> dict:
             return {}
         mean = (sum(metrics) / len(metrics)) if metrics else (sum(maxes) / len(maxes))
         worst = max(maxes) if maxes else mean
-    return {'mean': mean, 'worst': worst, 'band': _deltae_band(mean)}
+        colour = mean
+    return {'mean': mean, 'worst': worst, 'colour': colour, 'band': _deltae_band(colour)}
 
 
 def _alsc_falloff(grid: list) -> dict:
