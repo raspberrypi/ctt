@@ -111,6 +111,7 @@ def load_image(cam: Camera, im_str: str, mac_config: tuple | None = None, mac: b
                 result = None
                 logger.error('\nError: Image too dark!')
                 cam.log += '\nWARNING: Image too dark!'
+                cam.add_warning('warn', 'Image too dark', image=Path(im_str).name)
             else:
                 result = find_macbeth(cam, av_chan, mac_config)
 
@@ -123,6 +124,7 @@ def load_image(cam: Camera, im_str: str, mac_config: tuple | None = None, mac: b
             if img.saturated:
                 logger.error('\nERROR: Macbeth patches have saturated')
                 cam.log += '\nWARNING: Macbeth patches have saturated!'
+                cam.add_warning('warn', 'Macbeth patches saturated', image=Path(im_str).name)
                 return None
 
             if confidence is not None:

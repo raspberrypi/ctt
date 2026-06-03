@@ -191,6 +191,7 @@ def awb(
             bad = i - (error_1 < error_2)  # bad index (Python False=0, True=1)
             cam.log += f'\nPoint at {c_fit[bad]} K deleted as '
             cam.log += 'it is furthest from fit'
+            cam.add_warning('warn', f'Non-monotonic AWB CT curve: point at {c_fit[bad]} K discarded')
             r_fit = np.delete(r_fit, bad)
             b_fit = np.delete(b_fit, bad)
             c_fit = np.delete(c_fit, bad).astype(np.uint16)

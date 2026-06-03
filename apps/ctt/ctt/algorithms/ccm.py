@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 import colour.models
 import numpy as np
-from colour.difference import delta_E_CIE1976
+from colour.difference import delta_E_CIE2000
 from scipy.optimize import minimize
 
 from ..detection.patches import get_alsc_patches
@@ -100,6 +100,7 @@ class CcmCalibration(CalibrationAlgorithm):
             logger.error('ERROR: Matrix is singular!\nTake new pictures and try again...')
             cam.log += '\nERROR: Singular matrix encountered during fit!'
             cam.log += '\nCCM aborted!'
+            cam.add_warning('error', 'Singular matrix during CCM fit; CCM aborted')
             return None
 
         cam.log += '\nCCM calibration written to json file'
@@ -257,6 +258,25 @@ def ccm(
             f'maximum delta E = {new_worst_delta_e}'
         )
 
+        # Record structured per-image colour-accuracy metrics for the web UI.
+        # 'metric_*' hold the selected metric (average/maximum/sum); 'max_*' are
+        # always the worst-patch delta E so the UI can compare across runs.
+        # 'patches' is the post-optimisation delta E per Macbeth patch, paired
+        # with the patch's reference sRGB colour (0-255) for colour-coded bars.
+        de_after = deltae_array(after_gamma_lab, m_lab)
+        patches = [{'de': float(d), 'rgb': [int(v) for v in rgb]} for d, rgb in zip(de_after, m_rgb, strict=True)]
+        cam.metrics['ccm'].append(
+            {
+                'ct': img.col,
+                'metric': matrix_selection,
+                'metric_before': before_metric,
+                'metric_after': after_metric,
+                'max_before': old_worst_delta_e,
+                'max_after': new_worst_delta_e,
+                'patches': patches,
+            }
+        )
+
         # Top rectangle is ideal, left square is before optimisation, right square is after.
         visualise_macbeth_chart(
             m_rgb,
@@ -330,8 +350,8 @@ def transform_and_evaluate(
 
 
 def deltae_array(lab_a: np.ndarray, lab_b: np.ndarray) -> np.ndarray:
-    """Delta E (CIE 76) between corresponding rows; shapes (N, 3). Returns (N,) array."""
-    return np.asarray(delta_E_CIE1976(lab_a, lab_b))
+    """Delta E (CIE 2000) between corresponding rows; shapes (N, 3). Returns (N,) array."""
+    return np.asarray(delta_E_CIE2000(lab_a, lab_b))
 
 
 def sumde(lab_a: np.ndarray, lab_b: np.ndarray) -> float:
@@ -374,5 +394,5 @@ def do_ccm(r: np.ndarray, g: np.ndarray, b: np.ndarray, m_srgb: np.ndarray) -> l
 
 
 def deltae(color_a: list | np.ndarray, color_b: list | np.ndarray) -> float:
-    """Delta E (CIE 76) between two Lab colours (length-3)."""
-    return float(delta_E_CIE1976(np.asarray(color_a), np.asarray(color_b)))
+    """Delta E (CIE 2000) between two Lab colours (length-3)."""
+    return float(delta_E_CIE2000(np.asarray(color_a), np.asarray(color_b)))
