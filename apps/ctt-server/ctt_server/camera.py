@@ -145,6 +145,24 @@ class Picamera2Camera:
             raise CameraError('Failed to encode preview frame')
         return buf.tobytes()
 
+    def capture_png(self) -> bytes:
+        """Capture a full-resolution processed still (current tuning applied) as PNG.
+
+        Briefly switches the pipeline to a full-sensor-resolution still mode, then
+        back to the preview/video config — so the result is the full field of view
+        at native resolution, not the downscaled preview stream.
+        """
+        import cv2  # noqa: PLC0415
+
+        with self._lock:
+            still = self._picam2.create_still_configuration(main={'size': self.resolution, 'format': 'RGB888'})
+            arr = self._picam2.switch_mode_and_capture_array(still, 'main')
+        # Picamera2 'RGB888' arrays are BGR-ordered, which is exactly what cv2 wants.
+        ok, buf = cv2.imencode('.png', arr)
+        if not ok:
+            raise CameraError('Failed to encode PNG')
+        return buf.tobytes()
+
     def mjpeg_frames(self, fps: float = 10.0):
         """Yield multipart MJPEG chunks for a streaming HTTP response."""
         period = 1.0 / max(fps, 1.0)

@@ -8,10 +8,16 @@
   <div class="card"><div class="empty"><div class="big">📄</div>No tuning files yet.
     <a href="{{ url_for('run_page', name=project.name) }}">Run CTT</a> to generate a tuning to preview.</div></div>
 {% else %}
-<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, autoPreview: true })' x-init="init()">
+<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, runs: {{ runs|tojson }}, autoPreview: true })' x-init="init()">
   <!-- Live preview test -->
   <div class="card">
-    <div class="card-head"><h2>Live preview test</h2></div>
+    <div class="card-head">
+      <h2>Live preview test</h2>
+      <div class="seg" x-show="testing" x-cloak>
+        <button type="button" :class="{active: testKind==='generated'}" @click="startPreviewTest()" :disabled="busy">Generated</button>
+        <button type="button" :class="{active: testKind==='standard'}" @click="previewStandard()" :disabled="busy">Standard</button>
+      </div>
+    </div>
     <div class="banner error mt" x-show="testError" x-text="testError" x-cloak></div>
     <p class="muted" x-show="!testing" x-cloak>
       Restart the camera with the generated tuning and preview it live to judge the
@@ -22,10 +28,18 @@
       <button class="btn primary" x-show="!testing" @click="startPreviewTest()" :disabled="busy">
         <span x-text="busy ? 'Starting…' : '▶ Start live preview'"></span>
       </button>
+      <button class="btn" x-show="testing" @click="capturePng()" :disabled="busy">
+        <span x-text="busy ? 'Capturing…' : '⬇ Capture PNG (full res)'"></span>
+      </button>
       <button class="btn ghost" x-show="testing" @click="restoreDefault()" :disabled="busy">■ Stop (restore default)</button>
     </div>
     <div x-show="testing" x-cloak>
-      <div class="muted mt">Previewing <b x-text="testTuning"></b> · <span x-text="testTarget && testTarget.toUpperCase()"></span></div>
+      <div class="muted mt">
+        <template x-if="testKind === 'standard'"><span>Previewing <b>default (built-in)</b> tuning</span></template>
+        <template x-if="testKind !== 'standard'">
+          <span>Previewing <b x-text="testTuning"></b> · <span x-text="testTarget && testTarget.toUpperCase()"></span><span x-show="genLabel()"> · generated <span x-text="genLabel()"></span></span></span>
+        </template>
+      </div>
       <div class="preview-wrap big mt" :class="{ louping: loupe.active }" @dragstart.prevent
            @pointerdown="loupeStart($event)" @pointermove="loupeMove($event)"
            @pointerup="loupeEnd($event)" @pointerleave="loupeEnd($event)" @pointercancel="loupeEnd($event)">
