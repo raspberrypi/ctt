@@ -90,3 +90,20 @@ def test_next_index_increments():
     assert naming.next_index(existing, 'alsc', 5000) == 2
     assert naming.next_index(existing, 'alsc', 3000) == 1
     assert naming.next_index(existing, 'alsc', 4000) == 0
+
+
+def test_parse_filename_macbeth():
+    assert naming.parse_filename('d65_5858k_1344l.dng') == ('macbeth', 5858, 1344, 'd65')
+
+
+def test_parse_filename_alsc():
+    assert naming.parse_filename('alsc_3000k_2.dng') == ('alsc', 3000, None, None)
+
+
+def test_parse_filename_cac():
+    assert naming.parse_filename('cac_4500k_0.dng') == ('cac', 4500, None, None)
+
+
+def test_parse_filename_rejects_untagged():
+    with pytest.raises(naming.NamingError):
+        naming.parse_filename('IMG_1234.dng')

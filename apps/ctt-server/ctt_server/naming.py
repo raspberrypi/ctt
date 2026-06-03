@@ -113,6 +113,24 @@ def validate_filename(filename: str) -> tuple[bool, str]:
     return True, 'OK'
 
 
+def parse_filename(filename: str) -> tuple[str, int, int | None, str | None]:
+    """Parse a CTT-format filename into (image_type, colour_temp, lux, label).
+
+    Used to auto-tag uploaded images from their filename. Raises NamingError if
+    the name is not a valid CTT calibration filename.
+    """
+    ok, msg = validate_filename(filename)
+    if not ok:
+        raise NamingError(msg)
+    image_type = detect_type(filename)
+    colour_temp, lux = get_col_lux(filename)
+    label = None
+    if image_type == 'macbeth':
+        # The label is the prefix before the `_<K>k` tag, e.g. 'd65' in d65_5000k_800l.dng.
+        label = filename.split(f'_{colour_temp}k', 1)[0] or None
+    return image_type, colour_temp, lux, label
+
+
 def next_index(existing: list[str], image_type: str, colour_temp: int) -> int:
     """Return the next free replicate index for an ALSC/CAC name at this colour temp."""
     prefix = f'{image_type}_{colour_temp}k_'
