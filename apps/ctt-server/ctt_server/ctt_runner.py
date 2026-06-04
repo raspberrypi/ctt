@@ -38,6 +38,7 @@ def build_config(options: dict) -> dict:
     awb = options.get('awb', {})
     macbeth = options.get('macbeth', {})
     ccm = options.get('ccm', {})
+    lux = options.get('lux', {})
     matrix_selection = ccm.get('matrix_selection', 'average')
     if matrix_selection not in _CCM_MATRIX_SELECTIONS:
         matrix_selection = 'average'
@@ -61,6 +62,7 @@ def build_config(options: dict) -> dict:
             'show': 0,  # never pop interactive windows from the server
         },
         'ccm': ccm_config,
+        'lux': {'reference_target': int(lux.get('reference_target', 1000))},
     }
 
 

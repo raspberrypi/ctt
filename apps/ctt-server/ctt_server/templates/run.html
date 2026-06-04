@@ -69,6 +69,25 @@
       </div>
     </div>
 
+    <div class="divider"></div>
+    <h3>Lux</h3>
+    <div class="field">
+      <label>Reference</label>
+      <div class="seg">
+        <button type="button" :class="{active: luxMode==='single'}" @click="luxMode='single'">Single capture</button>
+        <button type="button" :class="{active: luxMode==='average'}" @click="luxMode='average'">Robust average</button>
+      </div>
+    </div>
+    <div class="field" x-show="luxMode==='single'" x-cloak>
+      <label>Anchor lux</label>
+      <input type="number" x-model.number="luxAnchor" min="1" step="50" placeholder="1000">
+      <div class="hint">Anchors the lux calibration on the single capture closest to this lux level (default 1000).</div>
+    </div>
+    <div class="field" x-show="luxMode==='average'" x-cloak>
+      <div class="hint"><b>Robust average</b> averages luminance-per-lux across all captures — less hostage to any one image, but it spreads per-illuminant error across the set.</div>
+    </div>
+
+    <div class="divider"></div>
     <div class="btn-row mt">
       <button class="btn primary" :disabled="running" @click="start()">
         <span x-text="running ? 'Running…' : '▶ Run calibration'"></span>

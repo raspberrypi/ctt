@@ -126,6 +126,14 @@ def run_ctt(
     ccm_matrix_selection = ccm_d.get('matrix_selection', 'average')
     ccm_matrix_selection_types = ccm_d.get('matrix_selection_types', ['average', 'maximum', 'patches'])
     ccm_test_patches = ccm_d.get('test_patches', [1, 2, 5, 8, 9, 12, 14])
+    lux_d = configs.get('lux', {})
+    # reference_target: lux to anchor the lux calibration on (single capture nearest it);
+    # 0 calibrates from a robust average across all captures instead.
+    lux_reference_target = lux_d.get('reference_target', 1000)
+    if not isinstance(lux_reference_target, (int, float)) or lux_reference_target < 0:
+        logger.warning('\nInvalid lux reference_target, defaulted to 1000')
+        lux_reference_target = 1000
+    lux_reference_target = int(lux_reference_target)
 
     if blacklevel < -1 or blacklevel >= 2**16:
         logger.warning('\nInvalid blacklevel, defaulted to 64')
@@ -153,6 +161,7 @@ def run_ctt(
         f'  ALSC    do_alsc_colour={do_alsc_colour}  luminance_strength={luminance_strength}  max_gain={lsc_max_gain}',
         f'  AWB     greyworld={greyworld}   Blacklevel  {blacklevel}   Macbeth  small={mac_small}  show={mac_show}',
         f'  CCM     matrix_selection={ccm_matrix_selection}  test_patches={ccm_test_patches}',
+        f'  LUX     reference_target={lux_reference_target or "0 (robust average)"}',
         f'  Disable {disable_str}',
         f'  Plot    {plot_str}',
     ]
@@ -204,7 +213,7 @@ def run_ctt(
         algorithms = [
             AlscCalibration(cam, platform, luminance_strength, do_alsc_colour, lsc_max_gain),
             GeqCalibration(cam, platform),
-            LuxCalibration(cam, platform),
+            LuxCalibration(cam, platform, lux_reference_target),
             NoiseCalibration(cam, platform),
         ]
         if 'rpi.cac' in json_template:
@@ -261,6 +270,7 @@ def run_ctt(
                 'matrix_selection': ccm_matrix_selection,
                 'greyworld': greyworld,
                 'blacklevel': blacklevel,
+                'lux_reference_target': lux_reference_target,
             },
         )
         counts = f'Macbeth: {n_macbeth}  ALSC: {n_alsc}  CAC: {n_cac}'
