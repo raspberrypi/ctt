@@ -74,8 +74,12 @@ def noise(cam: Camera, img: Image, plot: bool = False) -> list:
     fit2 = None
     if fit[1] < 0:
         corrected = 1
-        ones = np.ones(len(means))
-        y_data = stds / sq_means
+        # Only fit patches with a positive mean: the darkest patches of
+        # under-exposed captures sit at/below black, so sqrt(mean) is 0 and
+        # stds / sq_means would be inf/NaN, poisoning the slope (and the JSON).
+        valid = sq_means > 0
+        ones = np.ones(int(np.sum(valid)))
+        y_data = stds[valid] / sq_means[valid]
         fit2 = np.polyfit(ones, y_data, 0)
         cam.log += '\nOffset below zero. Fit recalculated with zero offset'
         cam.log += '\nNoise profile: offset = 0'

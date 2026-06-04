@@ -104,7 +104,7 @@ h3 { font-size: 0.95rem; color: var(--text-dim); text-transform: uppercase; lett
   color: var(--text-dim); border-bottom: 2px solid transparent; }
 .tabs a:hover { color: var(--text); text-decoration: none; }
 .tabs a.active { color: var(--accent-2); border-bottom-color: var(--accent); }
-.grid { display: grid; gap: 20px; }
+.grid { display: grid; gap: 20px; align-items: start; }
 .grid.cols-2 { grid-template-columns: 1.4fr 1fr; }
 .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 900px) { .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; } }
