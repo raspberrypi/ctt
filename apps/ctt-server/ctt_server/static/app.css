@@ -220,11 +220,16 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .stat { flex: 1; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; }
 .stat .n { font-size: 1.6rem; font-weight: 700; }
 .stat .l { color: var(--text-dim); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.stats.compact { gap: 10px; }
+.stats.compact .stat { padding: 8px 11px; }
+.stats.compact .stat .n { font-size: 1.1rem; }
+.stats.compact .stat .l { font-size: 0.66rem; }
 
 /* --- calibration metrics --- */
 /* Chart.js responsive container: a relatively-positioned box with a fixed
    height; Chart.js sizes the <canvas> inside it (maintainAspectRatio:false). */
 .chart-box { position: relative; height: 260px; }
+#alscChart { width: 100%; height: 100%; display: block; }
 .qbadge { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
   padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-dim); }
 .qbadge.good { color: var(--ok); border-color: rgba(47,179,68,0.5); background: rgba(47,179,68,0.1); }

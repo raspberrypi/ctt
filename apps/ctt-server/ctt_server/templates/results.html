@@ -50,7 +50,8 @@
   </template>
 
   <!-- AWB curve + ALSC falloff -->
-  <div class="grid cols-2 mt">
+  <div class="grid cols-2 mt" style="align-items: stretch">
+
     <div class="card" x-show="charts.awb" x-cloak>
       <div class="card-head"><h2>AWB CT curve</h2></div>
       <div class="chart-box"><canvas id="awbChart"></canvas></div>
@@ -65,8 +66,8 @@
           </template>
         </div>
       </div>
-      <canvas id="alscChart" width="320" height="240"></canvas>
-      <div class="stats mt" x-show="alscView()">
+      <div class="chart-box"><canvas id="alscChart" width="320" height="240"></canvas></div>
+      <div class="stats compact mt" x-show="alscView()">
         <div class="stat"><div class="n" x-text="fmt(alscView() && alscView().centre)"></div><div class="l">Centre gain</div></div>
         <div class="stat"><div class="n" x-text="fmt(alscView() && alscView().corner_max)"></div><div class="l">Max corner gain</div></div>
         <div class="stat"><div class="n" x-text="(metrics && metrics.config && metrics.config.max_gain) ?? '–'"></div><div class="l">Max gain cap</div></div>
