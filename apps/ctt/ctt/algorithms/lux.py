@@ -60,19 +60,31 @@ def lux(cam: Camera, img: Image) -> tuple[int, int, float]:
 
 
 def lux_calc(cam: Camera, img: Image, patches: list, channels: list) -> int:
-    ap_r = np.mean(patches[0][3::4])
-    ap_g = (np.mean(patches[1][3::4]) + np.mean(patches[2][3::4])) / 2
-    ap_b = np.mean(patches[3][3::4])
-    cam.log += '\nAverage channel values on grey patches:'
+    # Subtract the black level (clipped at zero) so Y is signal luminance. The runtime
+    # lux algorithm divides reference_Y into the AGC Y statistic, which is gathered after
+    # the ISP's black-level correction; reference_Y must be on the same footing or the
+    # lux ~ Y * exposure * gain proportionality (and so every estimate) is biased.
+    bl = img.blacklevel_16
+
+    def grey_mean(channel_patches):
+        return np.mean(np.clip(np.array(channel_patches[3::4], dtype=float) - bl, 0, None))
+
+    def image_mean(channel):
+        return np.mean(np.clip(channel.astype(float) - bl, 0, None))
+
+    ap_r = grey_mean(patches[0])
+    ap_g = (grey_mean(patches[1]) + grey_mean(patches[2])) / 2
+    ap_b = grey_mean(patches[3])
+    cam.log += '\nAverage channel values on grey patches (black subtracted):'
     cam.log += f'\nRed = {ap_r:.0f} Green = {ap_g:.0f} Blue = {ap_b:.0f}'
     gr = ap_g / ap_r
     gb = ap_g / ap_b
     cam.log += f'\nChannel gains: Red = {gr:.3f} Blue = {gb:.3f}'
 
-    a_r = np.mean(channels[0]) * gr
-    a_g = (np.mean(channels[1]) + np.mean(channels[2])) / 2
-    a_b = np.mean(channels[3]) * gb
-    cam.log += '\nAverage channel values over entire image scaled by channel gains:'
+    a_r = image_mean(channels[0]) * gr
+    a_g = (image_mean(channels[1]) + image_mean(channels[2])) / 2
+    a_b = image_mean(channels[3]) * gb
+    cam.log += '\nAverage channel values over entire image scaled by channel gains (black subtracted):'
     cam.log += f'\nRed = {a_r:.0f} Green = {a_g:.0f} Blue = {a_b:.0f}'
     y = 0.299 * a_r + 0.587 * a_g + 0.114 * a_b
     cam.log += f'\nY value calculated: {int(y)}'
