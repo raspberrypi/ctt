@@ -54,12 +54,14 @@ class CcmCalibration(CalibrationAlgorithm):
         matrix_selection: str = 'average',
         test_patches: list[int] | None = None,
         matrix_selection_types: list[str] | tuple[str, ...] | None = None,
+        default_ccms: list[dict] | None = None,
     ) -> None:
         super().__init__(camera, platform)
         self.do_alsc_colour = do_alsc_colour
         allowed = matrix_selection_types if matrix_selection_types is not None else _DEFAULT_MATRIX_SELECTION_TYPES
         self.matrix_selection = matrix_selection if matrix_selection in allowed else 'average'
         self.test_patches = list(test_patches if test_patches is not None else _DEFAULT_TEST_PATCHES)
+        self.default_ccms = default_ccms
 
     def run(self) -> dict | None:
         cam = self.camera
@@ -95,6 +97,7 @@ class CcmCalibration(CalibrationAlgorithm):
                 grid_size,
                 matrix_selection=self.matrix_selection,
                 test_patches=self.test_patches,
+                default_ccms=self.default_ccms,
             )
         except ArithmeticError:
             logger.error('ERROR: Matrix is singular!\nTake new pictures and try again...')
@@ -127,8 +130,14 @@ def ccm(
     *,
     matrix_selection: str = 'average',
     test_patches: list[int] | None = None,
+    default_ccms: list[dict] | None = None,
 ) -> list[dict]:
-    """Finds colour correction matrices for list of images."""
+    """Finds colour correction matrices for list of images.
+
+    When ``default_ccms`` (the built-in tuning's CCMs) is given, the same patches
+    are also evaluated against that reference matrix so the UI can compare the new
+    calibration's colour accuracy against the shipped default.
+    """
     imgs = cam.imgs
     # Standard macbeth chart colour values.
     m_rgb = np.array(
@@ -291,6 +300,15 @@ def ccm(
             }
         )
 
+        # Also evaluate the built-in default tuning's CCM against the same patches,
+        # so the UI can show "new calibration vs shipped default" colour accuracy.
+        if default_ccms:
+            md = interp_ccm(default_ccms, img.col)
+            if md is not None:
+                cam.metrics['ccm_default'].append(
+                    {'ct': img.col, 'patches': patch_metrics(rgb_scaled, md, m_lab, m_rgb)}
+                )
+
         # Top rectangle is ideal, left square is before optimisation, right square is after.
         visualise_macbeth_chart(
             m_rgb,
@@ -361,6 +379,44 @@ def transform_and_evaluate(
         idx = np.clip(idx, 0, 23)
         return float(np.sum(de[idx]))
     return float(np.mean(de))
+
+
+def patch_metrics(rgb_scaled: np.ndarray, ccm_matrix: np.ndarray, m_lab: np.ndarray, m_rgb: np.ndarray) -> list[dict]:
+    """Per-patch delta E (and brightness-normalised de_norm) for applying ccm_matrix.
+
+    Shared by the fitted CCM and any reference CCM (e.g. the built-in default) so
+    they are evaluated identically against the same measured patches.
+    """
+    out = rgb_scaled @ np.asarray(ccm_matrix).reshape((3, 3)).T
+    de = deltae_array(rgb_to_lab(out), m_lab)
+
+    def _mean(s, _o=out, _m=m_lab):
+        return float(np.mean(deltae_array(rgb_to_lab(s * _o), _m)))
+
+    s_opt = minimize_scalar(_mean, bounds=(0.5, 1.6), method='bounded').x
+    de_norm = deltae_array(rgb_to_lab(s_opt * out), m_lab)
+    return [
+        {'de': float(d), 'de_norm': float(dn), 'rgb': [int(v) for v in rgb]}
+        for d, dn, rgb in zip(de, de_norm, m_rgb, strict=True)
+    ]
+
+
+def interp_ccm(ccms: list[dict], ct: int) -> np.ndarray | None:
+    """Interpolate a 3x3 CCM from a [{ct, ccm:[9]}] list at colour temp ct (clamped)."""
+    pts = sorted((e for e in ccms if isinstance(e, dict) and 'ct' in e and 'ccm' in e), key=lambda e: e['ct'])
+    if not pts:
+        return None
+    cts = [e['ct'] for e in pts]
+    mats = [np.asarray(e['ccm'], dtype=float) for e in pts]
+    if ct <= cts[0]:
+        m = mats[0]
+    elif ct >= cts[-1]:
+        m = mats[-1]
+    else:
+        i = next(j for j in range(len(cts) - 1) if cts[j] <= ct <= cts[j + 1])
+        t = (ct - cts[i]) / (cts[i + 1] - cts[i])
+        m = mats[i] + t * (mats[i + 1] - mats[i])
+    return m.reshape((3, 3))
 
 
 def deltae_array(lab_a: np.ndarray, lab_b: np.ndarray) -> np.ndarray:

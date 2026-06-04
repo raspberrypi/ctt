@@ -14,8 +14,8 @@
     <div class="card-head">
       <h2>Live preview test</h2>
       <div class="seg" x-show="testing" x-cloak>
-        <button type="button" :class="{active: testKind==='generated'}" @click="startPreviewTest()" :disabled="busy">Generated</button>
-        <button type="button" :class="{active: testKind==='standard'}" @click="previewStandard()" :disabled="busy">Standard</button>
+        <button type="button" :class="{active: testKind==='generated'}" @click="startPreviewTest()" :disabled="busy">Tuned</button>
+        <button type="button" :class="{active: testKind==='standard'}" @click="previewStandard()" :disabled="busy">Existing</button>
       </div>
     </div>
     <div class="banner error mt" x-show="testError" x-text="testError" x-cloak></div>

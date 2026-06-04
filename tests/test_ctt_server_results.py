@@ -133,6 +133,35 @@ def test_parse_with_sidecar(tmp_path):
     assert m['config']['max_gain'] == 8.0
 
 
+def test_parse_with_default_comparison(tmp_path):
+    json_path = _write_tuning(tmp_path)
+    default_path = tmp_path / 'default.json'
+    default_path.write_text(
+        json.dumps(
+            {
+                'version': 2.0,
+                'target': 'pisp',
+                'algorithms': [
+                    {'rpi.awb': {'ct_curve': [3000, 0.9, 0.5, 5000, 0.7, 0.7]}},
+                ],
+            }
+        )
+    )
+    sidecar = {
+        'ccm': [{'ct': 5000, 'patches': [{'de': 1.0, 'de_norm': 1.0}, {'de': 3.0, 'de_norm': 2.0}]}],
+        'ccm_default': [{'ct': 5000, 'patches': [{'de': 4.0, 'de_norm': 3.0}, {'de': 8.0, 'de_norm': 6.0}]}],
+        'default_tuning_path': str(default_path),
+    }
+    metrics_path = tmp_path / 'cam_pisp_metrics.json'
+    metrics_path.write_text(json.dumps(sidecar))
+
+    m = results.parse_tuning_file(json_path, metrics_path)['metrics']
+    assert m['ccm_quality']['colour'] == 1.5  # mean de_norm of new calibration
+    assert m['ccm_default_quality']['colour'] == 4.5  # default tuning is worse
+    assert m['ccm_default_quality']['band'] == 'poor'
+    assert m['default']['charts']['awb']['points'][0]['ct'] == 3000  # default curves parsed
+
+
 def test_parse_with_corrupt_sidecar(tmp_path):
     # A malformed sidecar must degrade gracefully (no metrics, no exception).
     json_path = _write_tuning(tmp_path)

@@ -196,6 +196,11 @@ def run_ctt(
         if not (output_json_path and (alsc_only or colour_only)):
             cam.json_remove(disable)
         logger.info('\nStarting calibrations')
+        # Locate the sensor's built-in tuning for this ISP, so CCM can also report
+        # the shipped default's colour accuracy on these captures (best-effort).
+        default_ccms, default_path = _default_tuning_ccms(cam, target)
+        if default_path:
+            cam.metrics['default_tuning_path'] = default_path
         algorithms = [
             AlscCalibration(cam, platform, luminance_strength, do_alsc_colour, lsc_max_gain),
             GeqCalibration(cam, platform),
@@ -213,6 +218,7 @@ def run_ctt(
                 ccm_matrix_selection,
                 ccm_test_patches,
                 ccm_matrix_selection_types,
+                default_ccms,
             ),
         ]
 
@@ -268,6 +274,34 @@ def run_ctt(
         logger.info('\n' + '\n'.join(lines))
     else:
         cam.write_log(log_output)
+
+
+def _default_tuning_ccms(cam: Camera, target: str) -> tuple[list | None, str | None]:
+    """Locate the sensor's built-in libcamera tuning for this ISP; return its CCMs + path.
+
+    Best-effort: returns (None, None) if no camera images, no shipped tuning for the
+    sensor, or no CCM in it. Used only to compare the new calibration against the default.
+    """
+    if not cam.imgs:
+        return None, None
+    sensor = str(getattr(cam.imgs[0], 'cam_name', '') or '').strip().lower()
+    if not sensor:
+        return None, None
+    isp = 'pisp' if target == 'pisp' else 'vc4'
+    for base in ('/usr/share/libcamera/ipa/rpi', '/usr/local/share/libcamera/ipa/rpi'):
+        path = Path(base) / isp / f'{sensor}.json'
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return None, str(path)
+        for entry in data.get('algorithms', []):
+            if isinstance(entry, dict) and 'rpi.ccm' in entry:
+                ccms = entry['rpi.ccm'].get('ccms')
+                return (ccms or None), str(path)
+        return None, str(path)
+    return None, None
 
 
 def _write_metrics(cam: Camera, json_output: str, *, target: str, mode: str, config: dict) -> None:
