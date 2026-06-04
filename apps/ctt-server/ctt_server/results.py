@@ -10,6 +10,7 @@
 
 import contextlib
 import json
+import math
 from pathlib import Path
 
 # ISP grid dimensions (cols, rows) keyed by tuning-file target.
@@ -152,6 +153,24 @@ def _summary_charts(data: dict) -> dict:
     return {'summary': summary, 'charts': charts}
 
 
+def _finite(obj):
+    """Recursively replace non-finite floats (NaN/Inf) with None.
+
+    A degenerate calibration fit can leave a NaN/Inf in the tuning file (e.g. the
+    noise slope on under-exposed captures). Python's json emits these as the bare
+    tokens NaN/Infinity, which are invalid JSON: the browser's response.json()
+    then throws and the whole Results page fails to render. Sanitising here keeps
+    the payload valid JSON, so the page renders and the bad value just shows blank.
+    """
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _finite(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_finite(v) for v in obj]
+    return obj
+
+
 def parse_tuning_file(path: str | Path, metrics_path: str | Path | None = None) -> dict:
     """Return a JSON-serialisable summary + chart data for a tuning file.
 
@@ -183,4 +202,6 @@ def parse_tuning_file(path: str | Path, metrics_path: str | Path | None = None) 
                 metrics['default'] = _summary_charts(json.loads(Path(default_path).read_text()))
         result['metrics'] = metrics
 
-    return result
+    sanitised = _finite(result)
+    assert isinstance(sanitised, dict)
+    return sanitised

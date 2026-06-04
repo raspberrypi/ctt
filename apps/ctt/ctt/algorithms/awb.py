@@ -98,16 +98,35 @@ def awb(
 ) -> tuple:
     """Obtain piecewise linear approximation for the colour curve."""
     imgs = cam.imgs
+    # Flag low-light captures: an analogue gain well above the rest of the set means the
+    # image was under-exposed, so it is noisy and gives an unreliable white-balance /
+    # colour measurement. Threshold relative to the set's norm (with a floor), so it
+    # adapts to how the images were exposed rather than guessing an absolute level.
+    gains = [img.againQ8_norm for img in imgs]
+    gain_med = float(np.median(gains)) if gains else 1.0
+    gain_thresh = max(gain_med * 3.0, 4.0)
     # Obtain data from greyscale macbeth patches.
     rb_raw = []
     rbs_hat = []
     for img in imgs:
         cam.log += f'\nProcessing {img.name}'
+        if img.againQ8_norm > gain_thresh:
+            cam.add_warning(
+                'warn',
+                f'Low light: captured at {img.againQ8_norm:.1f}x analogue gain '
+                f'(vs ~{gain_med:.1f}x typical here) — noisy, so white balance and colour '
+                'may be unreliable; consider recapturing brighter',
+                image=img.name,
+            )
         # Get greyscale patches with ALSC applied if enabled; if disabled colour_cals is None.
         r_patches, b_patches, g_patches = get_alsc_patches(img, colour_cals, grid_size=grid_size)
-        # Calculate ratio of r, b to g.
-        r_g = np.mean(r_patches / g_patches)
-        b_g = np.mean(b_patches / g_patches)
+        # Calculate ratio of r, b to g. Exclude any per-pixel samples whose green channel
+        # is at or below black after subtraction: on the darkest patches of dark/noisy
+        # captures a few green pixels dip to the noise floor, and dividing by a zero or
+        # negative denominator yields inf/NaN that would later break the polyfit (SVD).
+        valid = g_patches > 0
+        r_g = np.mean(r_patches[valid] / g_patches[valid])
+        b_g = np.mean(b_patches[valid] / g_patches[valid])
         cam.log += f'\n       r : {r_g:.4f}       b : {b_g:.4f}'
         r_g_hat = r_g / (1 + r_g + b_g)
         b_g_hat = b_g / (1 + r_g + b_g)
@@ -176,6 +195,7 @@ def awb(
     b_fit = nudge_for_json(b_fit, decimals=4)
 
     # Ensure colour temperature decreases with increasing r/g; iterate backwards for easier indexing.
+    discarded = []
     i = len(c_fit) - 1
     while i > 0:
         if c_fit[i] > c_fit[i - 1]:
@@ -191,12 +211,24 @@ def awb(
             bad = i - (error_1 < error_2)  # bad index (Python False=0, True=1)
             cam.log += f'\nPoint at {c_fit[bad]} K deleted as '
             cam.log += 'it is furthest from fit'
-            cam.add_warning('warn', f'Non-monotonic AWB CT curve: point at {c_fit[bad]} K discarded')
+            discarded.append(int(c_fit[bad]))
             r_fit = np.delete(r_fit, bad)
             b_fit = np.delete(b_fit, bad)
             c_fit = np.delete(c_fit, bad).astype(np.uint16)
         # If a point was discarded, length decreased so decrementing i reassesses the kept point.
         i -= 1
+
+    # One summary warning rather than one per point: many near-identical lines otherwise
+    # swamp the Health panel when the colour data is noisy and the CT curve zig-zags.
+    if discarded:
+        cts = ', '.join(f'{ct} K' for ct in sorted(discarded))
+        n = len(discarded)
+        cam.add_warning(
+            'warn',
+            f'Non-monotonic AWB CT curve: {n} point{"s" if n > 1 else ""} discarded ({cts}). '
+            'Often a sign of noisy/under-exposed captures whose measured white balance '
+            'disagrees with their labelled colour temperature.',
+        )
 
     # Return formatted CT curve, ordered by increasing colour temperature.
     ct_curve = list(np.array(list(zip(b_fit, r_fit, c_fit, strict=True))).flatten())[::-1]

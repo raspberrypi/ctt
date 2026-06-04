@@ -100,6 +100,23 @@ def dng_load_image(cam: Camera, im_str: str) -> Image:
     return img
 
 
+def apply_gamma(av_chan: np.ndarray, cam: Camera) -> np.ndarray:
+    """Tone-map a linear 0-1 image with the tuning template's gamma curve.
+
+    The template's rpi.contrast gamma_curve is a piecewise-linear LUT of flat
+    [x0, y0, x1, y1, ...] pairs, input and output both 0-65535. Mapping the linear
+    Bayer mean through it reproduces the preview tone curve, which is what makes the
+    Macbeth chart reliably detectable. Falls back to a plain 2.2 gamma if the template
+    has no contrast curve (e.g. it was disabled).
+    """
+    curve = cam.json.get('rpi.contrast', {}).get('gamma_curve') if isinstance(cam.json, dict) else None
+    if not curve:
+        return np.power(np.clip(av_chan, 0, 1), 1 / 2.2)
+    pts = np.asarray(curve, dtype=np.float64).reshape(-1, 2)
+    xs, ys = pts[:, 0], pts[:, 1]
+    return np.interp(np.clip(av_chan, 0, 1) * 65535.0, xs, ys) / 65535.0
+
+
 def load_image(cam: Camera, im_str: str, mac_config: tuple | None = None, mac: bool = True) -> Image | None:
     if '.dng' in im_str:
         img = dng_load_image(cam, im_str)
@@ -113,7 +130,16 @@ def load_image(cam: Camera, im_str: str, mac_config: tuple | None = None, mac: b
                 cam.log += '\nWARNING: Image too dark!'
                 cam.add_warning('warn', 'Image too dark', image=Path(im_str).name)
             else:
-                result = find_macbeth(cam, av_chan, mac_config)
+                # Locate the chart on a tone-mapped copy. The raw Bayer mean is linear,
+                # so patch-to-patch contrast in the shadows/mid-tones is compressed and
+                # Canny edge detection misses the patch borders -- worst under high-CT
+                # light, where the red channel is weak. Applying the tuning template's
+                # gamma curve expands that low/mid contrast (matching the tone-mapped
+                # preview in which the chart is always found) and makes detection robust.
+                # Only the location search sees this; patch values are still read from the
+                # untouched linear channels in get_patches, so calibration is unchanged.
+                det_chan = apply_gamma(av_chan, cam)
+                result = find_macbeth(cam, det_chan, mac_config)
 
             if result is None or result[0] is None:
                 return None
