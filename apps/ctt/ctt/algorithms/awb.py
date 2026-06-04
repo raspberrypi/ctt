@@ -120,13 +120,18 @@ def awb(
             )
         # Get greyscale patches with ALSC applied if enabled; if disabled colour_cals is None.
         r_patches, b_patches, g_patches = get_alsc_patches(img, colour_cals, grid_size=grid_size)
-        # Calculate ratio of r, b to g. Exclude any per-pixel samples whose green channel
-        # is at or below black after subtraction: on the darkest patches of dark/noisy
-        # captures a few green pixels dip to the noise floor, and dividing by a zero or
-        # negative denominator yields inf/NaN that would later break the polyfit (SVD).
+        # Ratio of r, b to g as a signal-weighted ratio-of-sums (Σr/Σg), not an
+        # unweighted mean of per-pixel ratios. When one channel is weak (small signal
+        # under some illuminants) the darkest neutral patches push it towards the noise
+        # floor; an unweighted per-pixel mean lets those near-zero/negative samples drag
+        # the ratio far off, whereas ratio-of-sums lets the well-exposed patches dominate.
+        # It also matches how the runtime ISP measures white balance, so the calibrated CT
+        # curve agrees with what the camera reports. The green>0 mask keeps the
+        # denominator strictly positive. For a well-exposed sensor (uniform per-patch
+        # ratios) this is identical to the old mean.
         valid = g_patches > 0
-        r_g = np.mean(r_patches[valid] / g_patches[valid])
-        b_g = np.mean(b_patches[valid] / g_patches[valid])
+        r_g = np.sum(r_patches[valid]) / np.sum(g_patches[valid])
+        b_g = np.sum(b_patches[valid]) / np.sum(g_patches[valid])
         cam.log += f'\n       r : {r_g:.4f}       b : {b_g:.4f}'
         r_g_hat = r_g / (1 + r_g + b_g)
         b_g_hat = b_g / (1 + r_g + b_g)

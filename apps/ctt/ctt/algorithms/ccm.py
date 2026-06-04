@@ -187,12 +187,15 @@ def ccm(
         # Do AWB. AWB is done by measuring the macbeth chart in the image, rather than from
         # the AWB calibration, so the AWB will be perfect and the CCM matrices more accurate.
         r_greys, b_greys, g_greys = r[3::4], b[3::4], g[3::4]
-        # Exclude grey samples whose green channel is at or below black after subtraction
-        # (noise floor on the darkest patches): a zero or negative denominator would give
-        # inf/NaN ratios and poison the per-image white balance. No-op for healthy patches.
+        # Per-image white balance as a signal-weighted ratio-of-sums (Σr/Σg) rather than
+        # an unweighted mean of per-pixel ratios. When one channel is weak, the darkest
+        # neutral patches push it towards the noise floor; an unweighted mean lets those
+        # near-zero/negative samples corrupt the balance so the greys can't be
+        # neutralised, inflating ΔE on the neutral patches. Ratio-of-sums lets the
+        # well-exposed patches dominate. No-op for a well-exposed sensor.
         valid = g_greys > 0
-        r_g = np.mean(r_greys[valid] / g_greys[valid])
-        b_g = np.mean(b_greys[valid] / g_greys[valid])
+        r_g = np.sum(r_greys[valid]) / np.sum(g_greys[valid])
+        b_g = np.sum(b_greys[valid]) / np.sum(g_greys[valid])
         r = r / r_g
         b = b / b_g
         # Normalise brightness wrt reference macbeth colours and then average each channel per patch.
