@@ -161,6 +161,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .chip.macbeth { color: #ffd8a8; border-color: rgba(255,160,60,0.4); background: rgba(255,160,60,0.1); }
 .chip.alsc { color: #a5d8ff; border-color: rgba(80,160,255,0.4); background: rgba(80,160,255,0.1); }
 .chip.cac { color: #b2f2bb; border-color: rgba(80,220,120,0.4); background: rgba(80,220,120,0.1); }
+.chip.jpeg { color: #d0bfff; border-color: rgba(160,120,255,0.4); background: rgba(160,120,255,0.1); }
 
 /* --- preview --- */
 .preview-wrap { position: relative; background: #000; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center; }
@@ -206,6 +207,15 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .shot .x { position: absolute; top: 8px; right: 8px; opacity: 0; background: var(--panel-2); border-color: var(--err); }
 .shot:hover .x { opacity: 1; }
 .shot .x:hover { background: var(--err); color: #fff; border-color: var(--err); }
+.shot.clickable { cursor: pointer; }
+
+/* --- captured-image viewer (popup) --- */
+.viewer-backdrop { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.82);
+  display: flex; align-items: center; justify-content: center; padding: 24px; }
+.viewer-box { position: relative; }
+.viewer-box .preview-wrap { aspect-ratio: auto; width: 88vw; height: 84vh; max-width: 88vw; max-height: 84vh; }
+.viewer-close { position: absolute; top: 8px; right: 8px; z-index: 110; }
+.viewer-name { margin-top: 8px; text-align: center; font-family: var(--mono); font-size: 0.78rem; color: var(--text-dim); }
 
 /* --- checklist --- */
 .checklist { list-style: none; padding: 0; margin: 0; }

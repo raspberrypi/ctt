@@ -111,6 +111,71 @@ def test_session_delete_capture(tmp_path):
     assert not list(proj.path.glob('*.dng'))
 
 
+def test_add_capture_writes_and_omits_jpeg(tmp_path):
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('p')
+    proj.add_capture(b'DNG', 'alsc', 5000, jpeg_bytes=b'JPG')
+    assert (proj.path / 'alsc_5000k_0.jpg').read_bytes() == b'JPG'
+    assert proj.has_saved_jpeg('alsc_5000k_0.dng')
+    # No JPEG given -> no sidecar written.
+    proj.add_capture(b'DNG', 'alsc', 6000)
+    assert not (proj.path / 'alsc_6000k_1.jpg').exists()
+    assert not proj.has_saved_jpeg('alsc_6000k_1.dng')
+
+
+def test_recapture_overwrites_jpeg(tmp_path):
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('p')
+    proj.add_capture(b'D1', 'macbeth', 5000, lux=1000, jpeg_bytes=b'J1')
+    cap = proj.add_capture(b'D2', 'macbeth', 5000, lux=1000, jpeg_bytes=b'J2')
+    assert (proj.path / cap.filename).with_suffix('.jpg').read_bytes() == b'J2'
+    assert len(list(proj.path.glob('*.jpg'))) == 1
+
+
+def test_delete_capture_removes_jpeg(tmp_path):
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('p')
+    proj.add_capture(b'X', 'alsc', 3000, jpeg_bytes=b'JPG')
+    proj.delete_capture('alsc_3000k_0.dng')
+    assert not list(proj.path.glob('*.jpg'))
+    assert not list(proj.path.glob('*.dng'))
+
+
+def test_serialise_captures_jpeg_source(tmp_path):
+    from ctt_server.app import _RAWPY, _serialise_captures
+
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('p')
+    proj.add_capture(b'DNG', 'alsc', 5000, jpeg_bytes=b'JPG')  # has a saved JPEG
+    proj.import_capture('alsc_3000k_0.dng', b'X')  # DNG only
+    by_name = {c['filename']: c for c in _serialise_captures(proj)}
+    assert by_name['alsc_5000k_0.dng']['jpeg'] == 'saved'
+    assert by_name['alsc_3000k_0.dng']['jpeg'] == ('dng' if _RAWPY else None)
+
+
+def test_capture_jpeg_route(tmp_path):
+    from ctt_server.app import _RAWPY, create_app
+
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('cam')
+    proj.add_capture(b'DNG', 'alsc', 5000, jpeg_bytes=b'JPGDATA')
+    client = create_app(str(tmp_path)).test_client()
+
+    # Saved sibling JPEG is served verbatim.
+    r = client.get('/projects/cam/captures/alsc_5000k_0.dng/jpeg')
+    assert r.status_code == 200
+    assert r.mimetype == 'image/jpeg'
+    assert r.data == b'JPGDATA'
+
+    # A non-.dng name is rejected.
+    assert client.get('/projects/cam/captures/foo.txt/jpeg').status_code == 404
+
+    # DNG-only capture: 404 without rawpy; with rawpy the develop fails on junk bytes -> 500.
+    proj.import_capture('alsc_3000k_0.dng', b'NOTAREALDNG')
+    r = client.get('/projects/cam/captures/alsc_3000k_0.dng/jpeg')
+    assert r.status_code == (500 if _RAWPY else 404)
+
+
 def test_output_files_reports_mtime(tmp_path):
     ws = sessions.Workspace(tmp_path)
     proj = ws.create_project('cam')

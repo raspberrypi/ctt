@@ -144,6 +144,7 @@ function captureApp(cfg) {
     hflip: false,
     vflip: false,
     previewTick: 0,  // bumped to reconnect the MJPEG <img> after a camera reconfigure
+    viewer: { open: false, src: '', filename: '', developed: false },  // captured-image popup
 
     async init() {
       this.updateCounts();
@@ -350,6 +351,7 @@ function captureApp(cfg) {
         const entry = {
           filename: data.filename, image_type: data.image_type,
           colour_temp: data.colour_temp, lux: data.lux, label: data.label, valid: true,
+          jpeg: data.jpeg || 'saved',
         };
         // Replace the existing entry on overwrite, otherwise add to the top.
         const idx = this.captures.findIndex((c) => c.filename === data.filename);
@@ -400,6 +402,25 @@ function captureApp(cfg) {
         this.captures = this.captures.filter((c) => c.filename !== filename);
         this.updateCounts();
       }
+    },
+
+    openViewer(c) {
+      if (!c.jpeg) return;
+      this.viewer = {
+        open: true,
+        filename: c.filename,
+        developed: c.jpeg === 'dng',
+        src: `/projects/${this.project}/captures/${encodeURIComponent(c.filename)}/jpeg`,
+      };
+      // Reuse the single loupe for the modal image while it's open.
+      this._loupeIds = { img: 'viewerImg', canvas: 'viewerLoupe', marker: 'viewerMarker' };
+    },
+
+    closeViewer() {
+      this.viewer.open = false;
+      this.viewer.src = '';  // free the (large) decoded image
+      this.loupe.active = false;
+      this._loupeIds = { img: 'previewImg', canvas: 'loupeCanvas', marker: 'loupeMarker' };
     },
 
     checklist() {
