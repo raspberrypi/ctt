@@ -23,40 +23,56 @@ logger = logging.getLogger(__name__)
 class LuxCalibration(CalibrationAlgorithm):
     json_key = 'rpi.lux'
 
+    def __init__(self, camera: Camera, platform: object, reference_target: int = 1000) -> None:
+        super().__init__(camera, platform)
+        # reference_target > 0: calibrate Y from the single capture nearest this lux
+        # (the long-standing behaviour). reference_target == 0: calibrate Y from a robust
+        # average across all captures (less hostage to one image's noise / lux label).
+        self.reference_target = reference_target
+
     def run(self) -> dict | None:
         cam = self.camera
 
         cam.log_new_sec('LUX')
 
-        luxes = [img.lux for img in cam.imgs]
-        argmax = luxes.index(min(luxes, key=lambda lx: abs(1000 - lx)))
-        img = cam.imgs[argmax]
-        cam.log += f'\nLux found closest to 1000: {img.lux} lx'
-        cam.log += f'\nImage used: {img.name}'
-        if img.lux < 50:
-            cam.log += '\nWARNING: Low lux could cause inaccurate calibrations!'
+        target = self.reference_target
+        # Reference operating point carries the shutter/gain/lux the runtime divides by.
+        ref = min(cam.imgs, key=lambda im: abs((target or 1000) - im.lux))
 
-        lux_out, shutter_speed, gain = lux(cam, img)
+        if target > 0:
+            # Single image nearest the target lux; Y taken straight from it.
+            cam.log += f'\nReference lux target: {target} lx'
+            cam.log += f'\nImage used (nearest {target} lx): {ref.name} ({ref.lux} lx)'
+            if ref.lux < 50:
+                cam.log += '\nWARNING: Low lux could cause inaccurate calibrations!'
+            reference_Y = lux_calc(cam, ref, [ref.patches[i] for i in ref.order], [ref.channels[i] for i in ref.order])
+        else:
+            # Robust average. Y is proportional to lux*shutter*gain, so the slope
+            # k = Y / (lux*shutter*gain) should agree across captures; average it robustly
+            # (trim the extreme slopes) so one odd capture can't skew the whole lux scale.
+            cam.log += '\nReference lux target: 0 (robust average across all captures)'
+            cam.log += f'\nReference operating point: {ref.name} ({ref.lux} lx)'
+            eligible = [im for im in cam.imgs if im.lux >= 50] or list(cam.imgs)
+            slopes = []
+            for img in eligible:
+                y = lux_calc(cam, img, [img.patches[i] for i in img.order], [img.channels[i] for i in img.order])
+                slopes.append(y / (img.lux * img.exposure * img.againQ8_norm))
+            slopes.sort()
+            trimmed = slopes[1:-1] if len(slopes) >= 4 else slopes
+            k = float(np.mean(trimmed))
+            cam.log += f'\nPer-image lux slopes Y/(lux*exp*gain): {[round(s, 6) for s in slopes]}'
+            cam.log += f'\nRobust slope (trimmed mean of {len(trimmed)}/{len(slopes)}): {k:.6g}'
+            # runtime lux uses reference_Y / (reference_lux * shutter * gain) == k.
+            reference_Y = int(round(k * ref.lux * ref.exposure * ref.againQ8_norm))
 
+        cam.log += f'\nReference Y: {reference_Y}'
         cam.log += '\nLUX calibrations written to json file'
         return {
-            'reference_shutter_speed': shutter_speed,
-            'reference_gain': gain,
-            'reference_lux': img.lux,
-            'reference_Y': lux_out,
+            'reference_shutter_speed': ref.exposure,
+            'reference_gain': ref.againQ8_norm,
+            'reference_lux': ref.lux,
+            'reference_Y': reference_Y,
         }
-
-
-def lux(cam: Camera, img: Image) -> tuple[int, int, float]:
-    shutter_speed = img.exposure
-    gain = img.againQ8_norm
-    aperture = 1
-    cam.log += f'\nShutter speed = {shutter_speed}'
-    cam.log += f'\nGain = {gain}'
-    cam.log += f'\nAperture = {aperture}'
-    patches = [img.patches[i] for i in img.order]
-    channels = [img.channels[i] for i in img.order]
-    return lux_calc(cam, img, patches, channels), shutter_speed, gain
 
 
 def lux_calc(cam: Camera, img: Image, patches: list, channels: list) -> int:

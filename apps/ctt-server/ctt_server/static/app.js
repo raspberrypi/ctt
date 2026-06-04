@@ -460,6 +460,8 @@ function runApp(cfg) {
     blacklevel: -1,
     matrixSelection: 'average',
     testPatches: '1,2,5,8,9,12,14',
+    luxMode: 'single',          // 'single' = anchor on nearest-luxAnchor capture; 'average' = robust average
+    luxAnchor: 1000,            // anchor lux for single mode
     running: false,
     done: false,
     exitCode: null,
@@ -479,6 +481,7 @@ function runApp(cfg) {
         blacklevel: this.blacklevel,
         matrix_selection: this.matrixSelection,
         test_patches: this.matrixSelection === 'patches' ? this.testPatches : '',
+        lux_reference_target: this.luxMode === 'average' ? 0 : (this.luxAnchor || 1000),
       });
       this.source = new EventSource(`/projects/${this.project}/run/stream?${params}`);
       this.source.onmessage = (e) => {
