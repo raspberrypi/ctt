@@ -175,13 +175,14 @@
     <div class="banner error mt" x-show="uploadMsg" x-text="uploadMsg" x-cloak></div>
     <div class="shot-grid" x-show="captures.length">
       <template x-for="c in captures" :key="c.filename">
-        <div class="shot" :class="{invalid: !c.valid}">
-          <button class="btn sm danger x" @click="remove(c.filename)">✕</button>
+        <div class="shot" :class="{invalid: !c.valid, clickable: c.jpeg}" @click="c.jpeg && openViewer(c)">
+          <button class="btn sm danger x" @click.stop="remove(c.filename)">✕</button>
           <div class="fname" x-text="c.filename"></div>
           <div class="meta">
             <span class="chip" :class="c.image_type" x-text="c.image_type"></span>
             <span class="chip" x-text="c.colour_temp + 'K'"></span>
             <template x-if="c.lux"><span class="chip" x-text="c.lux + ' lx'"></span></template>
+            <template x-if="c.jpeg === 'saved'"><span class="chip jpeg">JPEG</span></template>
           </div>
         </div>
       </template>
@@ -206,6 +207,25 @@
         </li>
       </template>
     </ul>
+  </div>
+
+  <!-- Captured-image viewer (popup), shown when a box with a JPEG is clicked -->
+  <div class="viewer-backdrop" x-show="viewer.open" x-cloak
+       @click.self="closeViewer()" @keydown.escape.window="closeViewer()">
+    <div class="viewer-box">
+      <button class="btn sm ghost viewer-close" @click="closeViewer()">✕</button>
+      <div class="preview-wrap" :class="{ louping: loupe.active }" @dragstart.prevent
+           @pointerdown="loupeStart($event)" @pointermove="loupeMove($event)"
+           @pointerup="loupeEnd($event)" @pointerleave="loupeEnd($event)" @pointercancel="loupeEnd($event)">
+        <img id="viewerImg" draggable="false" :src="viewer.src" alt="captured image">
+        <div id="viewerMarker" class="loupe-marker" x-show="loupe.active" x-cloak></div>
+        <canvas id="viewerLoupe" class="loupe" width="220" height="220" x-show="loupe.active" x-cloak></canvas>
+      </div>
+      <div class="viewer-name">
+        <span x-text="viewer.filename"></span>
+        <span class="muted" x-show="viewer.developed"> · developed from DNG (rawpy preview)</span>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}

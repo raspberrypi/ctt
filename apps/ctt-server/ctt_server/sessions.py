@@ -116,8 +116,13 @@ class Project:
         lux: int | None = None,
         label: str | None = None,
         controls: dict | None = None,
+        jpeg_bytes: bytes | None = None,
     ) -> Capture:
-        """Write a DNG with a CTT-correct filename and record its metadata."""
+        """Write a DNG with a CTT-correct filename and record its metadata.
+
+        If jpeg_bytes is given, a full-resolution JPEG is written alongside the DNG
+        under the same stem (e.g. foo.dng -> foo.jpg) for in-browser preview.
+        """
         # Macbeth filenames are prefixed with the project (sensor) name by default.
         if image_type == 'macbeth' and not label:
             label = self.name
@@ -125,6 +130,11 @@ class Project:
         filename = naming.build_filename(image_type, colour_temp, lux=lux, label=label, index=index)
         self.path.mkdir(parents=True, exist_ok=True)
         (self.path / filename).write_bytes(dng_bytes)
+        jpg_path = (self.path / filename).with_suffix('.jpg')
+        if jpeg_bytes is not None:
+            jpg_path.write_bytes(jpeg_bytes)
+        else:
+            jpg_path.unlink(missing_ok=True)  # a re-capture without a JPEG must not leave a stale one
         capture = Capture(
             filename=filename,
             image_type=image_type,
@@ -174,8 +184,13 @@ class Project:
         target = self.path / filename
         if target.exists() and target.suffix == '.dng':
             target.unlink()
+            target.with_suffix('.jpg').unlink(missing_ok=True)  # remove the sibling preview JPEG
         self.captures = [c for c in self.captures if c.filename != filename]
         self.save()
+
+    def has_saved_jpeg(self, filename: str) -> bool:
+        """True if a sibling preview JPEG exists for this capture's DNG."""
+        return filename.endswith('.dng') and (self.path / filename).with_suffix('.jpg').exists()
 
     def counts(self) -> dict[str, int]:
         out = {'macbeth': 0, 'alsc': 0, 'cac': 0}

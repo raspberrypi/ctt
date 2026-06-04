@@ -40,6 +40,17 @@ from .sessions import Project, Workspace
 
 logger = logging.getLogger(__name__)
 
+# rawpy lets us develop a preview JPEG from a DNG that has no saved sibling JPEG
+# (uploaded or pre-existing captures). It is normally present (a ctt dependency);
+# if missing, those captures simply aren't viewable.
+try:
+    import rawpy  # noqa: F401
+
+    _RAWPY = True
+except Exception:  # pragma: no cover - depends on the environment
+    _RAWPY = False
+    logger.warning('rawpy not available: DNG-only captures will have no in-browser preview')
+
 
 def _run_info(available: dict) -> dict:
     """Map target -> {label, epoch} from each tuning file's mtime, for the UI."""
@@ -56,6 +67,12 @@ def _serialise_captures(project: Project) -> list[dict]:
     out = []
     for c in project.captures:
         valid, _ = validate_filename(c.filename)
+        if project.has_saved_jpeg(c.filename):
+            jpeg = 'saved'
+        elif _RAWPY and c.filename.endswith('.dng'):
+            jpeg = 'dng'  # no saved JPEG, but rawpy can develop a preview on demand
+        else:
+            jpeg = None
         out.append(
             {
                 'filename': c.filename,
@@ -64,6 +81,7 @@ def _serialise_captures(project: Project) -> list[dict]:
                 'lux': c.lux,
                 'label': c.label,
                 'valid': valid,
+                'jpeg': jpeg,
             }
         )
     return out
@@ -282,8 +300,10 @@ def create_app(workspace_root: str | None = None) -> Flask:
             colour_temp = int(body.get('colour_temp'))
             lux = int(body['lux']) if body.get('lux') not in (None, '') else None
             label = body.get('label') or None
-            dng_bytes, meta = get_shared_camera().capture_dng()
-            cap = proj.add_capture(dng_bytes, image_type, colour_temp, lux=lux, label=label, controls=meta)
+            dng_bytes, jpg_bytes, meta = get_shared_camera().capture_still()
+            cap = proj.add_capture(
+                dng_bytes, image_type, colour_temp, lux=lux, label=label, controls=meta, jpeg_bytes=jpg_bytes
+            )
         except CameraError as err:
             return jsonify({'error': str(err)}), 503
         except (TypeError, ValueError) as err:
@@ -295,6 +315,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
                 'colour_temp': cap.colour_temp,
                 'lux': cap.lux,
                 'label': cap.label,
+                'jpeg': 'saved',  # a fresh capture always has a full-res JPEG
                 'counts': proj.counts(),
             }
         )
@@ -320,6 +341,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
                         'lux': cap.lux,
                         'label': cap.label,
                         'valid': True,
+                        'jpeg': 'dng' if _RAWPY else None,  # no saved JPEG; develop on demand if possible
                     }
                 )
             except NamingError as err:
@@ -331,6 +353,32 @@ def create_app(workspace_root: str | None = None) -> Flask:
         proj = get_project_or_404(name)
         proj.delete_capture(filename)
         return jsonify({'ok': True, 'counts': proj.counts()})
+
+    @app.route('/projects/<name>/captures/<filename>/jpeg')
+    def capture_jpeg(name: str, filename: str):
+        """Serve a capture's preview JPEG: the saved sibling if present, else a
+        rawpy-developed preview of the DNG (won't match the ISP look)."""
+        proj = get_project_or_404(name)
+        if not filename.endswith('.dng'):  # <filename> can't contain '/', so no traversal
+            abort(404)
+        jpg = (proj.path / filename).with_suffix('.jpg')
+        if jpg.exists():
+            return send_file(jpg, mimetype='image/jpeg')
+        dng = proj.path / filename
+        if not (_RAWPY and dng.exists()):
+            abort(404)
+        import cv2  # noqa: PLC0415
+
+        try:
+            with rawpy.imread(str(dng)) as raw:
+                rgb = raw.postprocess()
+            ok, buf = cv2.imencode('.jpg', cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 90])
+        except Exception:
+            logger.exception('Failed to develop DNG preview for %s', filename)
+            abort(500)
+        if not ok:
+            abort(500)
+        return Response(buf.tobytes(), mimetype='image/jpeg')
 
     # --- run ---------------------------------------------------------------
     @app.route('/projects/<name>/run')
