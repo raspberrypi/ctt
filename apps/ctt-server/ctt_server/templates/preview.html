@@ -47,6 +47,86 @@
         <div id="resultLoupeMarker" class="loupe-marker" x-show="loupe.active" x-cloak></div>
         <canvas id="resultLoupeCanvas" class="loupe" width="220" height="220" x-show="loupe.active" x-cloak></canvas>
       </div>
+      <!-- Live sensor info + flips -->
+      <div class="caminfo mt">
+        <div class="caminfo-row" style="grid-template-columns: repeat(4, 1fr)">
+          <div><span class="k">Sensor</span><span class="v" x-text="camera.model || '—'"></span></div>
+          <div><span class="k">Resolution</span><span class="v" x-text="camera.resolution ? camera.resolution[0] + ' × ' + camera.resolution[1] : '—'"></span></div>
+          <div>
+            <span class="k">Flips</span>
+            <div class="seg compact" style="align-self:flex-start">
+              <button type="button" :class="{active: hflip}" @click="hflip=!hflip; applyTransform()" :disabled="busy" title="Horizontal flip">H</button>
+              <button type="button" :class="{active: vflip}" @click="vflip=!vflip; applyTransform()" :disabled="busy" title="Vertical flip">V</button>
+            </div>
+          </div>
+        </div>
+        <div class="caminfo-row" style="grid-template-columns: repeat(4, 1fr)">
+          <div><span class="k">Exposure</span><span class="v" x-text="(metered.exposure/1000).toFixed(1) + ' ms'"></span></div>
+          <div><span class="k">Gain</span><span class="v" x-text="metered.gain + '×'"></span></div>
+          <div><span class="k">Colour temp</span><span class="v" x-text="metered.colour_temp + ' K'"></span></div>
+          <div><span class="k">Lux</span><span class="v" x-text="metered.lux + ' lx'"></span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Exposure + lightbox controls, side by side -->
+  <div class="grid mt" style="grid-template-columns: 1fr 1fr">
+    <!-- Exposure controls -->
+    <div class="card" x-show="testing" x-cloak>
+      <div class="card-head"><h2>Exposure</h2>
+        <label class="flex" style="margin:0;font-weight:600">
+          <input type="checkbox" style="width:auto" x-model="controls.auto_exposure" @change="applyControls()"> Auto
+        </label>
+      </div>
+      <div class="field" :style="controls.auto_exposure ? 'opacity:.45;pointer-events:none' : ''">
+        <label>Exposure time — <span x-text="(controls.exposure/1000).toFixed(1)"></span> ms</label>
+        <input type="range" min="100" max="100000" step="100" x-model.number="controls.exposure" @change="applyControls()">
+      </div>
+      <div class="field" :style="controls.auto_exposure ? 'opacity:.45;pointer-events:none' : ''">
+        <label>Analogue gain — <span x-text="controls.gain"></span>×</label>
+        <input type="range" min="1" max="16" step="0.1" x-model.number="controls.gain" @change="applyControls()">
+      </div>
+      <div class="field" :style="!controls.auto_exposure ? 'opacity:.45;pointer-events:none' : ''">
+        <div class="spread" style="align-items:baseline">
+          <label style="margin:0">Exposure compensation — <span x-text="controls.ev.toFixed(1)"></span> EV</label>
+          <button type="button" class="btn sm ghost" @click="controls.ev = 0; applyControls()">Reset</button>
+        </div>
+        <input type="range" min="-8" max="8" step="0.1" x-model.number="controls.ev" @change="applyControls()">
+        <div class="hint">Biases auto-exposure brighter/darker (active when Auto is on).</div>
+      </div>
+    </div>
+
+    <!-- Lightbox (optional device — independent of the preview test) -->
+    <div class="card" x-show="lightbox.present" x-cloak>
+      <div class="card-head">
+        <h2>Lightbox</h2>
+        <span class="chip" x-text="lightbox.model + (lightbox.serial ? ' · ' + lightbox.serial : '')"></span>
+      </div>
+      <div class="field-row" style="align-items:flex-end; flex-wrap:wrap">
+        <div class="field" style="flex:0 0 180px; margin:0">
+          <label>Illuminant</label>
+          <select x-model.number="lightbox.channel" @change="setIlluminant()">
+            <template x-for="[ch, name] in Object.entries(lightbox.illuminants)" :key="ch">
+              <option :value="Number(ch)" x-text="ch + ' — ' + name"></option>
+            </template>
+          </select>
+        </div>
+        <div class="field" style="flex:1 1 200px; margin:0">
+          <label>Intensity</label>
+          <div class="flex" style="gap:10px; align-items:center; margin:0">
+            <input type="range" min="0" max="100" step="1" class="lb-slider" x-model.number="lightbox.intensity"
+                   @change="applyLightbox()" :style="{ '--fill': (lightbox.intensity || 0) + '%', flex: '1' }">
+            <input type="number" min="0" max="100" step="1" class="nospin" x-model.number="lightbox.intensity"
+                   @change="applyLightbox()" style="width:64px; flex:0 0 auto">
+            <span class="muted">%</span>
+          </div>
+        </div>
+        <div class="field" style="flex:0 0 auto; margin:0">
+          <button type="button" class="btn ghost" @click="lightboxOff()">Off</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>

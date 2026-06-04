@@ -23,61 +23,29 @@
     <div class="banner info mt" x-show="runsMismatch()" x-cloak>⚠ PiSP and VC4 were generated at different times, so the ALSC comparison may be stale — re-run to refresh both.</div>
   </div>
 
-  <!-- Calibration metrics (only present once a run has written the sidecar) -->
+  <!-- Colour accuracy (only present once a run has written the sidecar) -->
   <template x-if="metrics">
-    <div>
-      <div class="grid cols-2 mt">
-        <!-- Colour accuracy -->
-        <div class="card">
-          <div class="card-head">
-            <h2>Colour accuracy</h2>
-            <span class="qbadge" :class="metrics.ccm_quality.band" x-show="metrics.ccm_quality.band"
-                  x-text="bandLabel(metrics.ccm_quality.band)"></span>
-          </div>
-          <template x-if="metrics.ccm.length">
-            <div class="stats">
-              <div class="stat" x-show="ccmStats().colour !== null"><div class="n" x-text="fmt(ccmStats().colour)"></div><div class="l">Colour ΔE</div></div>
-              <div class="stat"><div class="n" x-text="fmt(ccmStats().mean)"></div><div class="l">Mean ΔE</div></div>
-              <div class="stat"><div class="n" x-text="fmt(ccmStats().worst)"></div><div class="l">Worst ΔE</div></div>
-            </div>
-          </template>
-          <div class="seg mt" x-show="metrics.ccm.length > 1 && ccmHasPatches()">
-            <template x-for="c in metrics.ccm" :key="c.ct">
-              <button type="button" :class="{active: ccmCt === c.ct}" @click="setCcmCt(c.ct)" x-text="c.ct + 'K'"></button>
-            </template>
-          </div>
-          <div class="chart-box mt" x-show="metrics.ccm.length"><canvas id="ccmChart"></canvas></div>
-          <p class="muted mt" x-show="!metrics.ccm.length" x-cloak>No CCM data (greyscale sensor or CCM disabled).</p>
-          <p class="hint">Delta E (CIE2000) per Macbeth patch after matrix optimisation, at the selected colour temperature — each bar is the patch's reference colour; lower is better. <b>Colour ΔE</b> removes the overall-brightness offset (set at runtime by exposure/tone), so it reflects the hue/saturation accuracy the matrix actually controls; the badge is graded on it.</p>
-        </div>
-
-        <!-- Health -->
-        <div class="card">
-          <div class="card-head"><h2>Health</h2></div>
-          <template x-if="!metrics.warnings.length">
-            <div class="muted">✓ No warnings — all images used cleanly.</div>
-          </template>
-          <template x-for="(w, i) in metrics.warnings" :key="i">
-            <div class="warnrow" :class="w.level">
-              <span class="ic" x-text="w.level === 'error' ? '✗' : '⚠'"></span>
-              <span x-text="w.message"></span>
-              <span class="muted" x-show="w.image" x-text="'· ' + w.image"></span>
-            </div>
-          </template>
-        </div>
+    <div class="card mt">
+      <div class="card-head">
+        <h2>Colour accuracy</h2>
+        <span class="qbadge" :class="metrics.ccm_quality.band" x-show="metrics.ccm_quality.band"
+              x-text="bandLabel(metrics.ccm_quality.band)"></span>
       </div>
-
-      <!-- Coverage -->
-      <div class="card mt">
-        <div class="card-head"><h2>Coverage</h2></div>
+      <template x-if="metrics.ccm.length">
         <div class="stats">
-          <div class="stat"><div class="n" x-text="metrics.counts.macbeth ?? '–'"></div><div class="l">Macbeth imgs</div></div>
-          <div class="stat"><div class="n" x-text="metrics.counts.alsc ?? '–'"></div><div class="l">ALSC imgs</div></div>
-          <div class="stat"><div class="n" x-text="ctRange()"></div><div class="l">CT range (K)</div></div>
-          <div class="stat"><div class="n" x-text="metrics.coverage.ccm_matrices ?? '–'"></div><div class="l">CCM matrices</div></div>
-          <div class="stat"><div class="n" x-text="metrics.coverage.awb_points ?? '–'"></div><div class="l">AWB points</div></div>
+          <div class="stat" x-show="ccmStats().colour !== null"><div class="n" x-text="fmt(ccmStats().colour)"></div><div class="l">Colour ΔE</div></div>
+          <div class="stat"><div class="n" x-text="fmt(ccmStats().mean)"></div><div class="l">Mean ΔE</div></div>
+          <div class="stat"><div class="n" x-text="fmt(ccmStats().worst)"></div><div class="l">Worst ΔE</div></div>
         </div>
+      </template>
+      <div class="seg mt" x-show="metrics.ccm.length > 1 && ccmHasPatches()">
+        <template x-for="c in metrics.ccm" :key="c.ct">
+          <button type="button" :class="{active: ccmCt === c.ct}" @click="setCcmCt(c.ct)" x-text="c.ct + 'K'"></button>
+        </template>
       </div>
+      <div class="chart-box mt" x-show="metrics.ccm.length"><canvas id="ccmChart"></canvas></div>
+      <p class="muted mt" x-show="!metrics.ccm.length" x-cloak>No CCM data (greyscale sensor or CCM disabled).</p>
+      <p class="hint">Delta E (CIE2000) per Macbeth patch after matrix optimisation, at the selected colour temperature — each bar is the patch's reference colour; lower is better. <b>Colour ΔE</b> removes the overall-brightness offset (set at runtime by exposure/tone), so it reflects the hue/saturation accuracy the matrix actually controls; the badge is graded on it.</p>
     </div>
   </template>
 
@@ -106,6 +74,38 @@
       <p class="hint">Blue → red maps low → high lens-shading gain; corners need more gain than the centre. ALSC is the one result that differs by ISP, so it has its own PiSP/VC4 toggle.</p>
     </div>
   </div>
+
+  <!-- Health + Coverage (only present once a run has written the sidecar) -->
+  <template x-if="metrics">
+    <div>
+      <!-- Health -->
+      <div class="card mt">
+        <div class="card-head"><h2>Health</h2></div>
+        <template x-if="!metrics.warnings.length">
+          <div class="muted">✓ No warnings — all images used cleanly.</div>
+        </template>
+        <template x-for="(w, i) in metrics.warnings" :key="i">
+          <div class="warnrow" :class="w.level">
+            <span class="ic" x-text="w.level === 'error' ? '✗' : '⚠'"></span>
+            <span x-text="w.message"></span>
+            <span class="muted" x-show="w.image" x-text="'· ' + w.image"></span>
+          </div>
+        </template>
+      </div>
+
+      <!-- Coverage -->
+      <div class="card mt">
+        <div class="card-head"><h2>Coverage</h2></div>
+        <div class="stats">
+          <div class="stat"><div class="n" x-text="metrics.counts.macbeth ?? '–'"></div><div class="l">Macbeth imgs</div></div>
+          <div class="stat"><div class="n" x-text="metrics.counts.alsc ?? '–'"></div><div class="l">ALSC imgs</div></div>
+          <div class="stat"><div class="n" x-text="ctRange()"></div><div class="l">CT range (K)</div></div>
+          <div class="stat"><div class="n" x-text="metrics.coverage.ccm_matrices ?? '–'"></div><div class="l">CCM matrices</div></div>
+          <div class="stat"><div class="n" x-text="metrics.coverage.awb_points ?? '–'"></div><div class="l">AWB points</div></div>
+        </div>
+      </div>
+    </div>
+  </template>
 
   <!-- Sensor references -->
   <div class="card mt" x-show="charts.lux || charts.noise || summary?.black_level !== undefined" x-cloak>

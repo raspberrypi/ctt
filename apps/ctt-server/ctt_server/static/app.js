@@ -7,6 +7,15 @@ function sanitiseLabel(s) {
   return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+// Sensor h/v flip persists across tabs/reloads (the camera resets it on every
+// reconfigure, so the browser is the source of truth and re-enforces it).
+function loadFlip() {
+  try { return JSON.parse(localStorage.getItem('cttFlip') || '{}'); } catch (e) { return {}; }
+}
+function saveFlip(hflip, vflip) {
+  try { localStorage.setItem('cttFlip', JSON.stringify({ hflip: !!hflip, vflip: !!vflip })); } catch (e) { /* ignore */ }
+}
+
 function detectType(name) {
   if (name.includes('alsc')) return 'alsc';
   if (name.includes('cac')) return 'cac';
@@ -138,6 +147,9 @@ function captureApp(cfg) {
 
     async init() {
       this.updateCounts();
+      // Restore the user's flip choice (persists across tabs/reloads).
+      const f = loadFlip();
+      this.hflip = !!f.hflip; this.vflip = !!f.vflip;
       try {
         const r = await fetch('/api/health');
         const h = await r.json();
@@ -145,7 +157,6 @@ function captureApp(cfg) {
         if (h.model) this.camera.model = h.model;
         if (h.resolution) this.camera.resolution = h.resolution;
         if (h.controls) this.metered = h.controls;
-        this.hflip = !!h.hflip; this.vflip = !!h.vflip;
       } catch (e) {
         this.connected = false;
       }
@@ -154,6 +165,8 @@ function captureApp(cfg) {
         // Returning from a Results-page preview test: restore the default tuning.
         // Idempotent server-side (no-op when already on the default).
         try { await fetch('/api/preview-default', { method: 'POST' }); } catch (e) { /* best effort */ }
+        // The reload reset the sensor flip; re-enforce the stored choice.
+        if (this.hflip || this.vflip) await this.applyTransform();
         this.loadControls();
         this.pollHistogram();
       }
@@ -161,6 +174,7 @@ function captureApp(cfg) {
 
     async applyTransform() {
       // Reconfigure the camera with the new flip and reconnect the preview stream.
+      saveFlip(this.hflip, this.vflip);
       try {
         await fetch('/api/transform', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -526,9 +540,18 @@ function resultsApp(cfg) {
     testKind: null,       // 'generated' | 'standard' — which tuning is live
     previewSrc: '',
     testError: '',
+    hflip: false,         // preview page: sensor flips, applied to the live test camera
+    vflip: false,
+    camera: {},           // preview page: {model, resolution} for the live sensor-info box
+    metered: { exposure: 0, gain: 0, colour_temp: 0, lux: 0 },  // live metered values
+    controls: { auto_exposure: true, exposure: 0, gain: 1, ev: 0 },  // exposure panel state
+    lightbox: { present: false, channel: null, intensity: 0, illuminants: {} },  // optional lightbox device
+    _polling: false,      // guards a single metered-poll loop
 
     init() {
-      if (this.autoPreview) this.startPreviewTest();  // Preview page: kick off the live test
+      const f = loadFlip();                            // restore flip choice (persists across tabs)
+      this.hflip = !!f.hflip; this.vflip = !!f.vflip;
+      if (this.autoPreview) { this.startPreviewTest(); this.loadLightbox(); }  // Preview page
       if (cfg.allTargets) this.loadAll();              // Results page: new/old + per-target ALSC
       else this.select(this.target);                   // Tuning/Preview: single target
     },
@@ -593,6 +616,8 @@ function resultsApp(cfg) {
         this.testing = true;
         // Cache-bust so the <img> opens a fresh MJPEG stream on the new camera.
         this.previewSrc = '/api/preview?t=' + Date.now();
+        if (this.hflip || this.vflip) await this._postTransform();  // re-apply flip on the fresh camera
+        this._loadCamInfo(); this.pollMetered();
       } catch (e) {
         this.testError = 'Preview request failed';
       } finally {
@@ -601,6 +626,91 @@ function resultsApp(cfg) {
     },
 
     genLabel() { return (this.runs[this.testTarget] || {}).label || ''; },
+
+    // POST the current flip state and reopen the stream on the reconfigured camera.
+    async _postTransform() {
+      saveFlip(this.hflip, this.vflip);
+      await fetch('/api/transform', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hflip: this.hflip, vflip: this.vflip }),
+      });
+      this.previewSrc = '/api/preview?t=' + Date.now();
+    },
+
+    async applyTransform() {
+      this.busy = true; this.testError = '';
+      try { await this._postTransform(); }
+      catch (e) { this.testError = 'Flip request failed'; }
+      finally { this.busy = false; }
+    },
+
+    // Fetch sensor model/resolution (and seed metered values) for the info box.
+    async _loadCamInfo() {
+      try {
+        const r = await fetch('/api/health');
+        if (!r.ok) return;
+        const h = await r.json();
+        if (h.model) this.camera.model = h.model;
+        if (h.resolution) this.camera.resolution = h.resolution;
+        if (h.controls) { this.metered = { ...h.controls }; this.controls = { ...h.controls }; }
+      } catch (e) { /* best effort */ }
+    },
+
+    async applyControls() {
+      try {
+        const r = await fetch('/api/controls', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.controls),
+        });
+        if (r.ok) this.controls = await r.json();
+      } catch (e) { this.testError = 'Failed to set controls'; }
+    },
+
+    // Poll live metered exposure/gain/CT/lux while the preview is running.
+    pollMetered() {
+      if (this._polling) return;
+      this._polling = true;
+      const tick = async () => {
+        if (!this.testing) { this._polling = false; return; }
+        try {
+          const cr = await fetch('/api/controls');
+          if (cr.ok) this.metered = await cr.json();
+        } catch (e) { /* transient */ }
+        if (this.testing) setTimeout(tick, 1500); else this._polling = false;
+      };
+      tick();
+    },
+
+    // --- optional lightbox device (same API as the Capture page) ----------
+    async loadLightbox() {
+      try {
+        const r = await fetch('/api/lightbox');
+        if (!r.ok) return;
+        const lb = await r.json();
+        const ch = lb.channel;  // capture before mutating: lb IS this.lightbox below
+        this.lightbox = lb;
+        if (lb.present && ch != null) {
+          // Re-assert the active channel once the <select>'s x-for options exist
+          // (Alpine applies x-model before they render, else it shows the first).
+          this.lightbox.channel = -1;
+          this.$nextTick(() => { this.lightbox.channel = ch; });
+        }
+      } catch (e) { /* lightbox is optional */ }
+    },
+    async postLightbox(body) {
+      try {
+        const r = await fetch('/api/lightbox', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (r.ok) this.lightbox = await r.json();
+        else { const d = await r.json().catch(() => ({})); this.testError = d.error || 'Lightbox command failed'; }
+      } catch (e) { this.testError = 'Lightbox request failed'; }
+    },
+    setIlluminant() { this.postLightbox({ channel: Number(this.lightbox.channel) }); },
+    applyLightbox() { this.postLightbox({ channel: Number(this.lightbox.channel), percent: this.lightbox.intensity }); },
+    lightboxOff() { this.postLightbox({ off: true }); },
 
     async previewStandard() {
       // Switch the live preview to the camera's default (built-in) tuning, for
@@ -614,6 +724,8 @@ function resultsApp(cfg) {
         this.testTuning = 'default (built-in)'; this.testTarget = null; this.testKind = 'standard';
         this.testing = true;
         this.previewSrc = '/api/preview?t=' + Date.now();
+        if (this.hflip || this.vflip) await this._postTransform();  // re-apply flip on the fresh camera
+        this._loadCamInfo(); this.pollMetered();
       } catch (e) {
         this.testError = 'Preview request failed';
       } finally {
