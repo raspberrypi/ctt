@@ -84,7 +84,12 @@
       <div class="hint">Anchors the lux calibration on the single capture closest to this lux level (default 1000).</div>
     </div>
     <div class="field" x-show="luxMode==='average'" x-cloak>
-      <div class="hint"><b>Robust average</b> averages luminance-per-lux across all captures — less hostage to any one image, but it spreads per-illuminant error across the set.</div>
+      <label>Method</label>
+      <div class="seg">
+        <button type="button" :class="{active: luxMethod==='trimmed-mean'}" @click="luxMethod='trimmed-mean'">Trimmed mean</button>
+        <button type="button" :class="{active: luxMethod==='median'}" @click="luxMethod='median'">Median</button>
+      </div>
+      <div class="hint"><b>Robust average</b> of luminance-per-lux across all captures — less hostage to any one image. <b>Median</b> resists a cluster of similar captures (e.g. several of one illuminant) better than the trimmed mean; both spread per-illuminant error across the set.</div>
     </div>
 
     <div class="divider"></div>

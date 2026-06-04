@@ -462,6 +462,7 @@ function runApp(cfg) {
     testPatches: '1,2,5,8,9,12,14',
     luxMode: 'single',          // 'single' = anchor on nearest-luxAnchor capture; 'average' = robust average
     luxAnchor: 1000,            // anchor lux for single mode
+    luxMethod: 'trimmed-mean',  // robust-average method: 'trimmed-mean' | 'median'
     running: false,
     done: false,
     exitCode: null,
@@ -482,6 +483,7 @@ function runApp(cfg) {
         matrix_selection: this.matrixSelection,
         test_patches: this.matrixSelection === 'patches' ? this.testPatches : '',
         lux_reference_target: this.luxMode === 'average' ? 0 : (this.luxAnchor || 1000),
+        lux_reference_method: this.luxMethod,
       });
       this.source = new EventSource(`/projects/${this.project}/run/stream?${params}`);
       this.source.onmessage = (e) => {
@@ -831,6 +833,38 @@ function resultsApp(cfg) {
       try {
         if (this.metrics && this.metrics.ccm && this.metrics.ccm.length) this.renderCcm();
       } catch (e) { console.error('CCM chart:', e); }
+      try {
+        if (this.metrics && this.metrics.lux && (this.metrics.lux.samples || []).length) this.renderLux();
+      } catch (e) { console.error('Lux chart:', e); }
+    },
+
+    renderLux() {
+      const lux = this.metrics.lux;
+      const ctx = document.getElementById('luxChart');
+      if (!ctx) return;
+      const pts = lux.samples.slice().sort((a, b) => a.ct - b.ct);
+      const xs = pts.map((p) => p.ct);
+      const ref = lux.reference_slope;
+      const opts = chartOpts('Colour temperature (K)', 'Y per lux·exp·gain');
+      opts.scales.x.type = 'linear';
+      opts.plugins.tooltip = { callbacks: {
+        label: (i) => i.dataset.label === 'captures'
+          ? `${pts[i.dataIndex].ct}K · ${pts[i.dataIndex].lux} lx · ${i.parsed.y.toFixed(5)}`
+          : `calibration ${i.parsed.y.toFixed(5)}`,
+      } };
+      this._charts.lux = new Chart(ctx, {
+        data: {
+          datasets: [
+            { type: 'scatter', label: 'captures',
+              data: pts.map((p) => ({ x: p.ct, y: p.slope })),
+              backgroundColor: '#3b82f6', pointRadius: 4 },
+            { type: 'line', label: 'calibration',
+              data: [{ x: Math.min(...xs), y: ref }, { x: Math.max(...xs), y: ref }],
+              borderColor: '#e5484d', borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0 },
+          ],
+        },
+        options: opts,
+      });
     },
 
     renderCcm() {
