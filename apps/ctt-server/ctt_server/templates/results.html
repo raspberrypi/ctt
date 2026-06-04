@@ -8,19 +8,19 @@
   <div class="card"><div class="empty"><div class="big">📄</div>No tuning files yet.
     <a href="{{ url_for('run_page', name=project.name) }}">Run CTT</a> to generate them.</div></div>
 {% else %}
-<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, runs: {{ runs|tojson }} })' x-init="init()">
-  <!-- Target selector -->
+<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, runs: {{ runs|tojson }}, allTargets: true })' x-init="init()">
+  <!-- New vs built-in default tuning -->
   <div class="card">
     <div class="card-head">
       <h2>Calibration results</h2>
-      <div class="seg">
-        <template x-for="t in targets" :key="t">
-          <button type="button" :class="{active: target===t}" @click="select(t)" x-text="t.toUpperCase()"></button>
-        </template>
+      <div class="seg" x-show="hasDefault()" x-cloak>
+        <button type="button" :class="{active: view==='new'}" @click="setView('new')">Tuned</button>
+        <button type="button" :class="{active: view==='old'}" @click="setView('old')">Existing</button>
       </div>
     </div>
-    <div class="muted mt" x-show="runLabel()" x-cloak>Generated <span x-text="runLabel()"></span></div>
-    <div class="banner info mt" x-show="runsMismatch()" x-cloak>⚠ PiSP and VC4 were generated at different times, so comparing them may be misleading — re-run to refresh both.</div>
+    <div class="muted mt" x-show="view==='new' && runLabel()" x-cloak>Generated <span x-text="runLabel()"></span></div>
+    <div class="muted mt" x-show="view==='old'" x-cloak>The sensor's shipped default tuning, evaluated on your captures.</div>
+    <div class="banner info mt" x-show="runsMismatch()" x-cloak>⚠ PiSP and VC4 were generated at different times, so the ALSC comparison may be stale — re-run to refresh both.</div>
   </div>
 
   <!-- Calibration metrics (only present once a run has written the sidecar) -->
@@ -88,15 +88,22 @@
       <div class="chart-box"><canvas id="awbChart"></canvas></div>
       <p class="hint">White-balance locus — R/G against B/G across the calibrated colour-temperature range (hover for the CT).</p>
     </div>
-    <div class="card" x-show="charts.alsc" x-cloak>
-      <div class="card-head"><h2>ALSC luminance falloff</h2></div>
+    <div class="card" x-show="alscView()" x-cloak>
+      <div class="card-head">
+        <h2>ALSC luminance falloff</h2>
+        <div class="seg compact" x-show="targets.length > 1" x-cloak>
+          <template x-for="t in targets" :key="t">
+            <button type="button" :class="{active: alscTarget===t}" @click="setAlscTarget(t)" x-text="t.toUpperCase()"></button>
+          </template>
+        </div>
+      </div>
       <canvas id="alscChart" width="320" height="240"></canvas>
-      <div class="stats mt" x-show="charts.alsc">
-        <div class="stat"><div class="n" x-text="fmt(charts.alsc && charts.alsc.centre)"></div><div class="l">Centre gain</div></div>
-        <div class="stat"><div class="n" x-text="fmt(charts.alsc && charts.alsc.corner_max)"></div><div class="l">Max corner gain</div></div>
+      <div class="stats mt" x-show="alscView()">
+        <div class="stat"><div class="n" x-text="fmt(alscView() && alscView().centre)"></div><div class="l">Centre gain</div></div>
+        <div class="stat"><div class="n" x-text="fmt(alscView() && alscView().corner_max)"></div><div class="l">Max corner gain</div></div>
         <div class="stat"><div class="n" x-text="(metrics && metrics.config && metrics.config.max_gain) ?? '–'"></div><div class="l">Max gain cap</div></div>
       </div>
-      <p class="hint">Blue → red maps low → high lens-shading gain; corners need more gain than the centre.</p>
+      <p class="hint">Blue → red maps low → high lens-shading gain; corners need more gain than the centre. ALSC is the one result that differs by ISP, so it has its own PiSP/VC4 toggle.</p>
     </div>
   </div>
 

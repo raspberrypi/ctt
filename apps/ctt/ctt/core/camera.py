@@ -62,7 +62,7 @@ class Camera:
         self.blacklevel_16 = 0
         # Structured calibration metrics, written alongside the JSON/log as a
         # sidecar for the web UI. Populated by the algorithms as they run.
-        self.metrics: dict = {'warnings': [], 'ccm': [], 'counts': {}, 'coverage': {}, 'config': {}}
+        self.metrics: dict = {'warnings': [], 'ccm': [], 'ccm_default': [], 'counts': {}, 'coverage': {}, 'config': {}}
 
     def add_warning(self, level: str, message: str, image: str | None = None) -> None:
         """Record a structured calibration warning (level: 'warn' or 'error')."""

@@ -512,6 +512,9 @@ function resultsApp(cfg) {
     charts: {},
     metrics: null,
     ccmCt: null,          // selected colour temp for the per-patch ΔE chart
+    view: 'new',          // results page: 'new' (this calibration) | 'old' (built-in default)
+    all: {},              // results page: target -> full /results/data response
+    alscTarget: cfg.targets[0],  // ALSC card's own target toggle (PISP/VC4)
     runs: cfg.runs || {}, // target -> {label, epoch}: when each tuning file was generated
     autoPreview: cfg.autoPreview || false,  // Preview page: start the live test on load
     _charts: {},
@@ -525,8 +528,59 @@ function resultsApp(cfg) {
     testError: '',
 
     init() {
-      this.select(this.target);
       if (this.autoPreview) this.startPreviewTest();  // Preview page: kick off the live test
+      if (cfg.allTargets) this.loadAll();              // Results page: new/old + per-target ALSC
+      else this.select(this.target);                   // Tuning/Preview: single target
+    },
+
+    // Results page: fetch every target's data up-front (needed for the per-target
+    // ALSC toggle), then render the primary target under the current new/old view.
+    async loadAll() {
+      for (const t of this.targets) {
+        try {
+          const r = await fetch(`/projects/${this.project}/results/data?target=${t}`);
+          if (r.ok) this.all[t] = await r.json();
+        } catch (e) { /* skip missing target */ }
+      }
+      this.target = this.targets.find((t) => this.all[t]) || this.targets[0];
+      this.alscTarget = this.target;
+      this.applyView();
+      this.$nextTick(() => requestAnimationFrame(() => this.renderCharts()));
+    },
+
+    // Point summary/charts/metrics at the selected target's new or old (default) data.
+    applyView() {
+      const d = this.all[this.target];
+      if (!d) { this.summary = null; this.charts = {}; this.metrics = null; return; }
+      if (this.view === 'old' && d.metrics && d.metrics.default) {
+        this.summary = d.metrics.default.summary;
+        this.charts = d.metrics.default.charts || {};
+        // Reuse run-level fields (counts/coverage/warnings); swap CCM to the default's.
+        this.metrics = { ...d.metrics, ccm: d.metrics.ccm_default || [], ccm_quality: d.metrics.ccm_default_quality || {} };
+      } else {
+        this.summary = d.summary; this.charts = d.charts || {}; this.metrics = d.metrics || null;
+      }
+      const cts = ((this.metrics && this.metrics.ccm) || []).map((c) => c.ct);
+      if (!cts.includes(this.ccmCt)) this.ccmCt = cts.length ? cts[0] : null;
+    },
+
+    hasDefault() { const d = this.all[this.target]; return !!(d && d.metrics && d.metrics.default); },
+    setView(v) {
+      this.view = v;
+      this.applyView();
+      this.$nextTick(() => requestAnimationFrame(() => this.renderCharts()));
+    },
+
+    // ALSC card data for its own target toggle, honouring the new/old view.
+    alscView() {
+      const d = this.all[this.alscTarget];
+      if (!d) return null;
+      const charts = (this.view === 'old' && d.metrics && d.metrics.default) ? d.metrics.default.charts : d.charts;
+      return charts ? charts.alsc : null;
+    },
+    setAlscTarget(t) {
+      this.alscTarget = t;
+      this.$nextTick(() => requestAnimationFrame(() => { try { this.renderAlsc(); } catch (e) { console.error(e); } }));
     },
 
     async startPreviewTest() {
@@ -658,7 +712,7 @@ function resultsApp(cfg) {
       this._charts = {};
       // Each chart is independent: a failure in one must not block the others.
       try { if (this.charts.awb) this.renderAwb(); } catch (e) { console.error('AWB chart:', e); }
-      try { if (this.charts.alsc) this.renderAlsc(); } catch (e) { console.error('ALSC chart:', e); }
+      try { if (this.alscView()) this.renderAlsc(); } catch (e) { console.error('ALSC chart:', e); }
       try {
         if (this.metrics && this.metrics.ccm && this.metrics.ccm.length) this.renderCcm();
       } catch (e) { console.error('CCM chart:', e); }
@@ -730,9 +784,9 @@ function resultsApp(cfg) {
     },
 
     renderAlsc() {
-      const a = this.charts.alsc;
+      const a = this.alscView();
       const canvas = document.getElementById('alscChart');
-      if (!canvas || !a.grid) return;
+      if (!canvas || !a || !a.grid) return;
       // Custom heatmap: gain values mapped blue(low)→red(high).
       const ctx = canvas.getContext('2d');
       const W = canvas.width, H = canvas.height;

@@ -8,6 +8,7 @@
 # Output file shape (ctt.core.camera.Camera.write_json):
 #   {"version": 2.0, "target": "pisp"|"bcm2835", "algorithms": [{name: data}, ...]}
 
+import contextlib
 import json
 from pathlib import Path
 
@@ -114,22 +115,11 @@ def _load_metrics(metrics_path: str | Path | None) -> dict:
         return {}
 
 
-def parse_tuning_file(path: str | Path, metrics_path: str | Path | None = None) -> dict:
-    """Return a JSON-serialisable summary + chart data for a tuning file.
-
-    ``metrics_path`` is the optional structured sidecar written during the run;
-    when present, its calibration-quality metrics are merged into the result.
-    """
-    data = json.loads(Path(path).read_text())
+def _summary_charts(data: dict) -> dict:
+    """Build {summary, charts} (coefficient views) from a parsed tuning-file dict."""
     target = data.get('target', '')
     algos = _algorithms(data)
-
-    summary = {
-        'target': target,
-        'version': data.get('version'),
-        'algorithms': sorted(algos.keys()),
-    }
-
+    summary = {'target': target, 'version': data.get('version'), 'algorithms': sorted(algos.keys())}
     charts: dict = {}
 
     awb = algos.get('rpi.awb', {})
@@ -159,12 +149,23 @@ def parse_tuning_file(path: str | Path, metrics_path: str | Path | None = None) 
     if isinstance(black, dict) and 'black_level' in black:
         summary['black_level'] = black['black_level']
 
-    result = {'summary': summary, 'charts': charts}
+    return {'summary': summary, 'charts': charts}
+
+
+def parse_tuning_file(path: str | Path, metrics_path: str | Path | None = None) -> dict:
+    """Return a JSON-serialisable summary + chart data for a tuning file.
+
+    ``metrics_path`` is the optional structured sidecar written during the run;
+    when present, its calibration-quality metrics are merged into the result, plus
+    a parsed view + re-evaluated ΔE for the built-in default tuning (for new-vs-old).
+    """
+    result = _summary_charts(json.loads(Path(path).read_text()))
 
     raw_metrics = _load_metrics(metrics_path)
     if raw_metrics:
         ccm_list = raw_metrics.get('ccm', [])
-        result['metrics'] = {
+        ccm_default = raw_metrics.get('ccm_default', [])
+        metrics = {
             'ccm': sorted(ccm_list, key=lambda c: c.get('ct', 0)),
             'ccm_quality': _ccm_quality(ccm_list),
             'warnings': raw_metrics.get('warnings', []),
@@ -172,5 +173,14 @@ def parse_tuning_file(path: str | Path, metrics_path: str | Path | None = None) 
             'coverage': raw_metrics.get('coverage', {}),
             'config': raw_metrics.get('config', {}),
         }
+        if ccm_default:
+            metrics['ccm_default'] = sorted(ccm_default, key=lambda c: c.get('ct', 0))
+            metrics['ccm_default_quality'] = _ccm_quality(ccm_default)
+        # Parsed coefficient view of the built-in default tuning (the "old" side).
+        default_path = raw_metrics.get('default_tuning_path')
+        if default_path and Path(default_path).exists():
+            with contextlib.suppress(OSError, json.JSONDecodeError):
+                metrics['default'] = _summary_charts(json.loads(Path(default_path).read_text()))
+        result['metrics'] = metrics
 
     return result
