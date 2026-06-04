@@ -103,6 +103,41 @@ def _alsc_grid(luminance_lut: list, target: str) -> dict:
     }
 
 
+def _alsc_rgb(alsc: dict, cols: int, rows: int) -> dict:
+    """Per-cell R/G/B lens-shading gains for the hover read-out.
+
+    Green is the luminance LUT; red/blue are that scaled by the colour-shading tables
+    (Cr/Cb) at a representative colour temperature (the middle calibration). Returns
+    2D grids matching the luminance grid, or {} if the tables don't line up.
+    """
+    lut = alsc.get('luminance_lut', [])
+    n = cols * rows
+    if not (cols and rows and len(lut) == n):
+        return {}
+
+    def pick(cals: list) -> tuple[list | None, int | None]:
+        if not cals:
+            return None, None
+        cal = cals[len(cals) // 2]  # representative CT
+        tab = cal.get('table')
+        return (tab if isinstance(tab, list) and len(tab) == n else None), cal.get('ct')
+
+    cr, colour_ct = pick(alsc.get('calibrations_Cr', []))
+    cb, _ = pick(alsc.get('calibrations_Cb', []))
+    if cr is None or cb is None:
+        return {}
+
+    def to2d(flat: list) -> list:
+        return [flat[r * cols : (r + 1) * cols] for r in range(rows)]
+
+    return {
+        'r': to2d([lut[i] * cr[i] for i in range(n)]),
+        'g': to2d(lut),
+        'b': to2d([lut[i] * cb[i] for i in range(n)]),
+        'colour_ct': colour_ct,
+    }
+
+
 def _load_metrics(metrics_path: str | Path | None) -> dict:
     """Read the metrics sidecar, returning {} if absent or unreadable."""
     if metrics_path is None:
@@ -137,6 +172,7 @@ def _summary_charts(data: dict) -> dict:
     if isinstance(alsc, dict) and alsc.get('luminance_lut'):
         charts['alsc'] = _alsc_grid(alsc['luminance_lut'], target)
         charts['alsc'].update(_alsc_falloff(charts['alsc']['grid']))
+        charts['alsc'].update(_alsc_rgb(alsc, charts['alsc']['cols'], charts['alsc']['rows']))
 
     lux = algos.get('rpi.lux', {})
     if isinstance(lux, dict):

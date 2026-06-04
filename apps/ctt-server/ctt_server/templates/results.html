@@ -54,7 +54,7 @@
 
     <div class="card" x-show="charts.awb" x-cloak>
       <div class="card-head"><h2>AWB CT curve</h2></div>
-      <div class="chart-box"><canvas id="awbChart"></canvas></div>
+      <div class="chart-box compact"><canvas id="awbChart"></canvas></div>
       <p class="hint">White-balance locus — R/G against B/G across the calibrated colour-temperature range (hover for the CT).</p>
     </div>
     <div class="card" x-show="alscView()" x-cloak>
@@ -66,13 +66,15 @@
           </template>
         </div>
       </div>
-      <div class="chart-box"><canvas id="alscChart" width="320" height="240"></canvas></div>
-      <div class="stats compact mt" x-show="alscView()">
-        <div class="stat"><div class="n" x-text="fmt(alscView() && alscView().centre)"></div><div class="l">Centre gain</div></div>
-        <div class="stat"><div class="n" x-text="fmt(alscView() && alscView().corner_max)"></div><div class="l">Max corner gain</div></div>
-        <div class="stat"><div class="n" x-text="(metrics && metrics.config && metrics.config.max_gain) ?? '–'"></div><div class="l">Max gain cap</div></div>
+      <div class="chart-box compact">
+        <canvas id="alscChart" width="320" height="240"></canvas>
+        <div class="alsc-tip" x-show="alscHover" x-cloak
+             :style="alscHover ? `left:${alscHover.x}px; top:${alscHover.y}px` : ''">
+          <span>R <b x-text="fmt(alscHover && alscHover.r)"></b></span>
+          <span>G <b x-text="fmt(alscHover && alscHover.g)"></b></span>
+          <span>B <b x-text="fmt(alscHover && alscHover.b)"></b></span>
+        </div>
       </div>
-      <p class="hint">Blue → red maps low → high lens-shading gain; corners need more gain than the centre. ALSC is the one result that differs by ISP, so it has its own PiSP/VC4 toggle.</p>
     </div>
   </div>
 
