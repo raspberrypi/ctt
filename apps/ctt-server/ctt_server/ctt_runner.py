@@ -62,7 +62,10 @@ def build_config(options: dict) -> dict:
             'show': 0,  # never pop interactive windows from the server
         },
         'ccm': ccm_config,
-        'lux': {'reference_target': int(lux.get('reference_target', 1000))},
+        'lux': {
+            'reference_target': int(lux.get('reference_target', 1000)),
+            'reference_method': lux.get('reference_method', 'trimmed-mean'),
+        },
     }
 
 

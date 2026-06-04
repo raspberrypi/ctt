@@ -75,6 +75,13 @@
     </div>
   </div>
 
+  <!-- Lux luminance response -->
+  <div class="card mt" x-show="metrics && metrics.lux && (metrics.lux.samples || []).length" x-cloak>
+    <div class="card-head"><h2>Lux response</h2></div>
+    <div class="chart-box"><canvas id="luxChart"></canvas></div>
+    <p class="hint">Luminance per lux (Y / lux·exp·gain) for each capture against colour temperature — ideally flat. The dashed line is the value the lux calibration uses. A sloped/scattered response means the sensor's luminance-per-lux is colour-temperature dependent, so a single lux reference will read off away from the anchor.</p>
+  </div>
+
   <!-- Health + Coverage (only present once a run has written the sidecar) -->
   <template x-if="metrics">
     <div>
