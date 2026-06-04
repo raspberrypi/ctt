@@ -534,6 +534,7 @@ function resultsApp(cfg) {
     view: 'new',          // results page: 'new' (this calibration) | 'old' (built-in default)
     all: {},              // results page: target -> full /results/data response
     alscTarget: cfg.targets[0],  // ALSC card's own target toggle (PISP/VC4)
+    alscHover: null,             // {col,row,r,g,b} gains under the cursor on the ALSC grid
     runs: cfg.runs || {}, // target -> {label, epoch}: when each tuning file was generated
     autoPreview: cfg.autoPreview || false,  // Preview page: start the live test on load
     _charts: {},
@@ -950,6 +951,21 @@ function resultsApp(cfg) {
           ctx.fillRect(c * cw, r * ch, Math.ceil(cw), Math.ceil(ch));
         }
       }
+      // Hover read-out: map the cursor to a grid cell and expose its R/G/B gains.
+      const self = this;
+      canvas.onmousemove = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const px = e.clientX - rect.left, py = e.clientY - rect.top;
+        const c = Math.min(cols - 1, Math.max(0, Math.floor(px / rect.width * cols)));
+        const r = Math.min(rows - 1, Math.max(0, Math.floor(py / rect.height * rows)));
+        self.alscHover = {
+          x: px, y: py,
+          r: a.r ? a.r[r][c] : null,
+          g: a.g ? a.g[r][c] : a.grid[r][c],
+          b: a.b ? a.b[r][c] : null,
+        };
+      };
+      canvas.onmouseleave = () => { self.alscHover = null; };
     },
   };
 }
