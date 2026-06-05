@@ -147,7 +147,7 @@ def alsc_all(
             t_b = nudge_for_json(t_b, decimals=3)
             r_corners = (t_r[0], t_r[grid_w - 1], t_r[-1], t_r[-grid_w])
             b_corners = (t_b[0], t_b[grid_w - 1], t_b[-1], t_b[-grid_w])
-            middle_pos = (grid_h // 2 - 1) * grid_w + grid_w - 1
+            middle_pos = (grid_h // 2 - 1) * grid_w + (grid_w // 2 - 1)
             r_cen = t_r[middle_pos] + t_r[middle_pos + 1] + t_r[middle_pos + grid_w] + t_r[middle_pos + grid_w + 1]
             r_cen = round(r_cen / 4, 3)
             b_cen = t_b[middle_pos] + t_b[middle_pos + 1] + t_b[middle_pos + grid_w] + t_b[middle_pos + grid_w + 1]
@@ -169,9 +169,10 @@ def alsc_all(
     lum_lut = list(nudge_for_json(lum_lut, decimals=3))
 
     # Calculate average corner for LSC gain calculation further on.
-    corners = (lum_lut[0], lum_lut[15], lum_lut[-1], lum_lut[-16])
+    corners = (lum_lut[0], lum_lut[grid_w - 1], lum_lut[-1], lum_lut[-grid_w])
     cam.log += f'\nLuminance table corners: {corners}'
-    l_cen = lum_lut[5 * 16 + 7] + lum_lut[5 * 16 + 8] + lum_lut[6 * 16 + 7] + lum_lut[6 * 16 + 8]
+    mid = (grid_h // 2 - 1) * grid_w + (grid_w // 2 - 1)
+    l_cen = lum_lut[mid] + lum_lut[mid + 1] + lum_lut[mid + grid_w] + lum_lut[mid + grid_w + 1]
     l_cen = round(l_cen / 4, 3)
     cam.log += f'\nLuminance table centre: {l_cen}'
     av_corn = np.sum(corners) / 4
