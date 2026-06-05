@@ -64,7 +64,7 @@ class AlscCalibration(CalibrationAlgorithm):
             cam.log += 'greyscale image!\nALSC colour corrections forced off!'
 
         do_plot = self.json_key in getattr(cam, 'plot', [])
-        cal_cr_list, cal_cb_list, luminance_lut, av_corn = alsc_all(
+        cal_cr_list, cal_cb_list, luminance_lut = alsc_all(
             cam, do_alsc_colour, grid_size, max_gain=max_gain, plot=do_plot
         )
 
@@ -168,14 +168,13 @@ def alsc_all(
     lum_lut = np.mean(list_cg, axis=0)
     lum_lut = list(nudge_for_json(lum_lut, decimals=3))
 
-    # Calculate average corner for LSC gain calculation further on.
+    # Log the luminance table corners and centre for a quick sanity check.
     corners = (lum_lut[0], lum_lut[grid_w - 1], lum_lut[-1], lum_lut[-grid_w])
     cam.log += f'\nLuminance table corners: {corners}'
     mid = (grid_h // 2 - 1) * grid_w + (grid_w // 2 - 1)
     l_cen = lum_lut[mid] + lum_lut[mid + 1] + lum_lut[mid + grid_w] + lum_lut[mid + grid_w + 1]
     l_cen = round(l_cen / 4, 3)
     cam.log += f'\nLuminance table centre: {l_cen}'
-    av_corn = np.sum(corners) / 4
 
     if plot and len(imgs_alsc) > 0:
         # Plot first image's grids as 3D surfaces.
@@ -200,7 +199,7 @@ def alsc_all(
             ax.set_title('ALSC (luminance only) cg')
         plt.show()
 
-    return cal_cr_list, cal_cb_list, lum_lut, av_corn
+    return cal_cr_list, cal_cb_list, lum_lut
 
 
 def alsc(
@@ -219,9 +218,11 @@ def alsc(
     av_ch_g = np.mean((channels[1:3]), axis=0)
     if do_alsc_colour:
         # Obtain grid_w x grid_h grid of intensities for each channel and subtract black level.
-        g = get_grid(av_ch_g, dx, dy, grid_size) - img.blacklevel_16
-        r = get_grid(channels[0], dx, dy, grid_size) - img.blacklevel_16
-        b = get_grid(channels[3], dx, dy, grid_size) - img.blacklevel_16
+        # Floor at 1 so a dark/vignetted cell at or below black level can't make a ratio
+        # divide by zero (inf/nan) or go negative (which would flip the min-normalisation).
+        g = np.maximum(get_grid(av_ch_g, dx, dy, grid_size) - img.blacklevel_16, 1)
+        r = np.maximum(get_grid(channels[0], dx, dy, grid_size) - img.blacklevel_16, 1)
+        b = np.maximum(get_grid(channels[3], dx, dy, grid_size) - img.blacklevel_16, 1)
         # Calculate ratios as 32-bit for medianBlur; then median blur to remove peaks.
         cr = np.reshape(g / r, (grid_h, grid_w)).astype('float32')
         cb = np.reshape(g / b, (grid_h, grid_w)).astype('float32')
@@ -237,8 +238,8 @@ def alsc(
         return img.col, cr.flatten(), cb.flatten(), cg_clamp, (w, h, dx, dy)
 
     else:
-        # Only perform calculations for luminance shading.
-        g = get_grid(av_ch_g, dx, dy, grid_size) - img.blacklevel_16
+        # Only perform calculations for luminance shading. Floor at 1 (see colour branch).
+        g = np.maximum(get_grid(av_ch_g, dx, dy, grid_size) - img.blacklevel_16, 1)
         cg = np.reshape(1 / g, (grid_h, grid_w)).astype('float32')
         cg = cv2.medianBlur(cg, 3).astype('float64')
         cg = cg / np.min(cg)
