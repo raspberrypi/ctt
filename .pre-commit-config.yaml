@@ -1,0 +1,19 @@
+# Pre-commit hooks for ctt. Mirrors the CI "Lint & Format" job so formatting and
+# lint problems are caught locally before they reach a PR.
+#
+# One-time setup (per clone), using the project venv:
+#   venv/bin/pre-commit install
+# Run manually against everything:
+#   venv/bin/pre-commit run --all-files
+#
+# The ruff version is pinned for reproducibility; bump it with:
+#   venv/bin/pre-commit autoupdate
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.16
+    hooks:
+      # Linter (equivalent to CI `ruff check .`); --fix auto-applies safe fixes.
+      - id: ruff-check
+        args: [--fix]
+      # Formatter (equivalent to CI `ruff format --check .`).
+      - id: ruff-format

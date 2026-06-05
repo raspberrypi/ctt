@@ -32,6 +32,9 @@ server = ["flask>=3.0"]
 # Pi. pyusb is lazy-imported so core CTT is unaffected; also needs a libusb backend
 # (sudo apt install libusb-1.0-0). See apps/ctt/ctt/devices/.
 devices = ["pyusb>=1.2"]
+# Developer tooling: lint/format hooks run via pre-commit (config in .pre-commit-config.yaml).
+# After `pip install -e ".[dev]"`, enable the hooks once with `pre-commit install`.
+dev = ["pre-commit>=4.0"]
 
 [project.scripts]
 ctt = "ctt.ctt:main"

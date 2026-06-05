@@ -278,6 +278,16 @@ python3 -m ruff format .
 python3 -m ruff format --check .
 ```
 
+These same checks run in CI. To catch problems before committing, enable the
+[pre-commit](https://pre-commit.com/) hooks (they run ruff lint + format on each
+commit, mirroring CI):
+
+```bash
+pip install -e ".[dev]"
+pre-commit install            # one-time, per clone
+pre-commit run --all-files    # optional: check the whole tree now
+```
+
 ### Running tests
 
 Install with the test extra and run pytest:
