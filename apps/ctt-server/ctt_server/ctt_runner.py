@@ -119,6 +119,11 @@ def run_ctt_stream(
         config_path = write_config(project, options or {})
         alsc_only = mode == 'alsc-only'
         colour_only = mode == 'colour-only'
+        # Honour per-capture exclusion: pass the include-list only when something
+        # is excluded, so the default run still picks up stray on-disk DNGs that
+        # aren't registered in project.json (exactly as before).
+        has_excluded = any(c.excluded for c in project.captures)
+        images = [c.filename for c in project.captures if not c.excluded] if has_excluded else None
         q: queue.Queue = queue.Queue()
         result: dict[str, int] = {}
 
@@ -145,6 +150,7 @@ def run_ctt_stream(
                     targets,
                     alsc_only=alsc_only,
                     colour_only=colour_only,
+                    images=images,
                 )
             except ArgError as err:
                 code = 1
@@ -159,7 +165,10 @@ def run_ctt_stream(
                 result['code'] = code
                 q.put(_SENTINEL)
 
-        yield f'$ ctt (in-process)  targets={",".join(targets)}  mode={mode}'
+        header = f'$ ctt (in-process)  targets={",".join(targets)}  mode={mode}'
+        if images is not None:
+            header += f'  excluded={sum(1 for c in project.captures if c.excluded)}'
+        yield header
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         while True:

@@ -455,6 +455,14 @@ function imagesApp(cfg) {
       this.loupe.active = false;
     },
 
+    async toggleExclude(c) {
+      const r = await fetch(`/projects/${this.project}/captures/${encodeURIComponent(c.filename)}/exclude`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ excluded: !c.excluded }),
+      });
+      if (r.ok) c.excluded = (await r.json()).excluded;
+    },
+
     async openExif(c) {
       this.exif = { open: true, filename: c.filename, loading: true, error: '', summary: [], tags: [] };
       try {

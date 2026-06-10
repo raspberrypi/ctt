@@ -83,6 +83,7 @@ def _serialise_captures(project: Project) -> list[dict]:
                 'label': c.label,
                 'valid': valid,
                 'jpeg': jpeg,
+                'excluded': c.excluded,
             }
         )
     return out
@@ -405,6 +406,17 @@ def create_app(workspace_root: str | None = None) -> Flask:
         proj.delete_capture(filename)
         return jsonify({'ok': True, 'counts': proj.counts()})
 
+    @app.route('/projects/<name>/captures/<filename>/exclude', methods=['POST'])
+    def set_capture_excluded(name: str, filename: str):
+        """Exclude a capture from (or re-include it in) CTT runs; the file stays on disk."""
+        proj = get_project_or_404(name)
+        body = request.get_json(force=True) or {}
+        try:
+            cap = proj.set_excluded(filename, bool(body.get('excluded', True)))
+        except KeyError:
+            abort(404, f'No such capture: {filename}')
+        return jsonify({'filename': cap.filename, 'excluded': cap.excluded})
+
     def _develop_dng(dng: Path, thumb: bool = False) -> Response:
         """Develop a DNG into a preview JPEG with rawpy (won't match the ISP look).
 
@@ -463,7 +475,8 @@ def create_app(workspace_root: str | None = None) -> Flask:
     @app.route('/projects/<name>/run')
     def run_page(name: str):
         proj = get_project_or_404(name)
-        return render_template('run.html', project=proj, counts=proj.counts())
+        excluded_count = sum(1 for c in proj.captures if c.excluded)
+        return render_template('run.html', project=proj, counts=proj.counts(), excluded_count=excluded_count)
 
     @app.route('/projects/<name>/run/stream')
     def run_stream(name: str):

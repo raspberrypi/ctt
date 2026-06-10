@@ -19,6 +19,8 @@ from pathlib import Path
 from .core.runner import get_platform, get_target_from_tuning_file, run_ctt_targets
 from .output.converter import convert_v2
 from .output.json_formatter import pretty_print
+from .utils.errors import ArgError
+from .utils.tools import read_manifest
 
 # Optional ANSI styling (disabled when not a TTY)
 _USE_COLOR = sys.stdout.isatty()
@@ -76,6 +78,12 @@ def main() -> None:
     parser.add_argument('-o', '--output', type=str, help='Output directory (default: current directory)')
     parser.add_argument('--name', type=str, help='Base name for output files (default: derived from input directory)')
     parser.add_argument('-c', '--config', type=str, help='Configuration file')
+    parser.add_argument(
+        '--manifest',
+        type=str,
+        help='Text file listing the .dng files (one per line, relative to -i) to use.\n'
+        'Blank lines and # comments are ignored. Default: all .dng files in -i.',
+    )
     parser.add_argument('--template', type=str, help='Custom template JSON file')
     parser.add_argument('--update', type=str, help='Existing tuning file to update')
     parser.add_argument(
@@ -149,6 +157,13 @@ def main() -> None:
     if args.input is None:
         parser.error('Calibration mode requires -i/--input')
 
+    images = None
+    if args.manifest is not None:
+        try:
+            images = read_manifest(args.manifest, args.input)
+        except ArgError as err:
+            parser.error(str(err))
+
     output_dir = Path(args.output) if args.output else Path.cwd()
     output_dir.mkdir(parents=True, exist_ok=True)
     name = args.name if args.name else Path(args.input).resolve().name
@@ -164,4 +179,5 @@ def main() -> None:
         template_path=args.template,
         update_path=args.update,
         plot_cli=args.plot,
+        images=images,
     )

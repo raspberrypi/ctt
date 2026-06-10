@@ -213,6 +213,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .img-card .fname { font-family: var(--mono); font-size: 0.78rem; color: var(--text); word-break: break-all; margin-bottom: 8px; }
 .img-card .meta { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip.bad { color: #ffc9c9; border-color: rgba(229,72,77,0.4); background: rgba(229,72,77,0.1); }
+.chip.warn { color: #ffe8b3; border-color: rgba(241,162,4,0.4); background: rgba(241,162,4,0.1); }
+
+/* Excluded-from-run captures: dimmed and desaturated; hover restores so the menu is readable. */
+.img-card.excluded { opacity: 0.55; }
+.img-card.excluded .thumb img { filter: grayscale(0.8); }
+.img-card.excluded:hover, .img-card.excluded:focus-within { opacity: 1; }
 
 /* Hover menu overlaid on the thumbnail. */
 .card-menu {

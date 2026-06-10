@@ -223,3 +223,46 @@ def test_run_stream_in_process_empty_project(tmp_path):
     assert any('Loading images from' in line for line in lines)
     assert any('No usable' in line for line in lines)
     assert lines[-1] == 'CTT_EXIT 0'
+
+
+def test_set_excluded_persists(tmp_path):
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('p')
+    proj.add_capture(b'DNG', 'alsc', 5000)
+    cap = proj.set_excluded('alsc_5000k_0.dng', True)
+    assert cap.excluded is True
+    # Survives a reload from project.json; toggling back also persists.
+    assert ws.get_project('p').captures[0].excluded is True
+    proj.set_excluded('alsc_5000k_0.dng', False)
+    assert ws.get_project('p').captures[0].excluded is False
+    with pytest.raises(KeyError):
+        proj.set_excluded('nope.dng', True)
+
+
+def test_old_sidecar_loads_without_excluded_key(tmp_path):
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('p')
+    entry = {'filename': 'alsc_5000k_0.dng', 'image_type': 'alsc', 'colour_temp': 5000}
+    proj.sidecar.write_text(json.dumps({'captures': [entry]}))
+    assert ws.get_project('p').captures[0].excluded is False
+
+
+def test_run_stream_passes_image_list(tmp_path, monkeypatch):
+    # With a capture excluded, the runner gets the include-list; with none
+    # excluded it gets None (so stray on-disk DNGs are still picked up).
+    import ctt.core.runner as runner_mod
+
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('p')
+    proj.add_capture(b'DNG', 'alsc', 5000)
+    proj.add_capture(b'DNG', 'alsc', 3000)
+    calls = []
+    monkeypatch.setattr(runner_mod, 'run_ctt_targets', lambda *a, **kw: calls.append(kw))
+
+    list(ctt_runner.run_ctt_stream(proj, ['pisp'], 'full', {}))
+    assert calls[-1]['images'] is None
+
+    proj.set_excluded('alsc_3000k_0.dng', True)
+    lines = list(ctt_runner.run_ctt_stream(proj, ['pisp'], 'full', {}))
+    assert calls[-1]['images'] == ['alsc_5000k_0.dng']
+    assert any('excluded=1' in line for line in lines)

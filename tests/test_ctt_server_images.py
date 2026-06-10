@@ -140,3 +140,29 @@ def test_capture_exif_route(tmp_path, monkeypatch):
     body = r.get_json()
     assert body['filename'] == 'alsc_5000k_0.dng'
     assert body['summary'] == [] and body['tags'] == []
+
+
+# --- exclude from run ---
+
+
+def test_exclude_endpoint_round_trip(tmp_path):
+    from ctt_server.app import _serialise_captures
+
+    client, proj = _client_with_project(tmp_path)
+    r = client.post('/projects/cam/captures/alsc_5000k_0.dng/exclude', json={'excluded': True})
+    assert r.status_code == 200
+    assert r.get_json() == {'filename': 'alsc_5000k_0.dng', 'excluded': True}
+    by_name = {c['filename']: c for c in _serialise_captures(proj.__class__(proj.path))}
+    assert by_name['alsc_5000k_0.dng']['excluded'] is True
+    assert by_name['d65_5858k_1344l.dng']['excluded'] is False
+
+    r = client.post('/projects/cam/captures/alsc_5000k_0.dng/exclude', json={'excluded': False})
+    assert r.get_json()['excluded'] is False
+    assert client.post('/projects/cam/captures/nope.dng/exclude', json={'excluded': True}).status_code == 404
+
+
+def test_run_page_shows_excluded_count(tmp_path):
+    client, proj = _client_with_project(tmp_path)
+    assert b'excluded' not in client.get('/projects/cam/run').data
+    proj.set_excluded('alsc_5000k_0.dng', True)
+    assert b'1 excluded' in client.get('/projects/cam/run').data

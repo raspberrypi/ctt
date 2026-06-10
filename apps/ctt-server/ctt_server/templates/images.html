@@ -24,7 +24,7 @@
 
     <div class="img-grid mt" x-show="captures.length">
       <template x-for="c in captures" :key="c.filename">
-        <div class="img-card" :class="{ invalid: !c.valid }">
+        <div class="img-card" :class="{ invalid: !c.valid, excluded: c.excluded }">
           <div class="thumb" :class="{ clickable: c.jpeg }" @click="c.jpeg && openViewer(c, bestSource(c))">
             <template x-if="c.jpeg">
               <img loading="lazy" draggable="false" :src="thumbSrc(c)" :alt="c.filename">
@@ -34,6 +34,7 @@
               <button x-show="c.jpeg === 'saved'" @click.stop="openViewer(c, 'jpeg')">Preview (JPEG)</button>
               <button x-show="rawpy" @click.stop="openViewer(c, 'raw')">Preview (raw)</button>
               <button @click.stop="openExif(c)">EXIF</button>
+              <button @click.stop="toggleExclude(c)" x-text="c.excluded ? 'Include in run' : 'Exclude from run'"></button>
               <button class="danger" @click.stop="remove(c.filename)">Delete</button>
             </div>
           </div>
@@ -45,6 +46,7 @@
               <template x-if="c.lux"><span class="chip" x-text="c.lux + ' lx'"></span></template>
               <template x-if="c.jpeg === 'saved'"><span class="chip jpeg">JPEG</span></template>
               <template x-if="!c.valid"><span class="chip bad">invalid name</span></template>
+              <template x-if="c.excluded"><span class="chip warn">excluded</span></template>
             </div>
           </div>
         </div>
