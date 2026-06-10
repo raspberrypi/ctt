@@ -48,11 +48,12 @@
             </div>
           </div>
         </div>
-        <div class="caminfo-row" style="grid-template-columns: repeat(4, 1fr)">
+        <div class="caminfo-row" style="grid-template-columns: repeat(5, 1fr)">
           <div><span class="k">Exposure</span><span class="v" x-text="(metered.exposure/1000).toFixed(1) + ' ms'"></span></div>
           <div><span class="k">Gain</span><span class="v" x-text="metered.gain + '×'"></span></div>
           <div><span class="k">Colour temp</span><span class="v" x-text="metered.colour_temp + ' K'"></span></div>
           <div><span class="k">Lux</span><span class="v" x-text="metered.lux + ' lx'"></span></div>
+          <div><span class="k">Focus FoM</span><span class="v" x-text="metered.focus_fom"></span></div>
         </div>
       </div>
     </div>

@@ -134,7 +134,7 @@ function captureApp(cfg) {
     form: { image_type: 'macbeth', colour_temp: 6500, lux: 1000 },
     controls: { exposure: 10000, gain: 1.0, auto_exposure: true, colour_temp: 0, lux: 0, ev: 0 },
     camera: { model: '', resolution: null },
-    metered: { exposure: 0, gain: 0, colour_temp: 0, lux: 0 },
+    metered: { exposure: 0, gain: 0, colour_temp: 0, lux: 0, focus_fom: 0 },
     clip: { r: 0, g: 0, b: 0 },
     macbeth: { found: false, confidence: null, corners: null, small: false, saturated: false },
     lightbox: { present: false, channel: null, illuminant: '', intensity: 0, illuminants: {} },
