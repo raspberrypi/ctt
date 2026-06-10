@@ -2,6 +2,11 @@
 // Copyright (C) 2026, Raspberry Pi
 // ctt-server browser logic: Alpine components for capture, run and results.
 
+// Chart.js has its own default font stack; match the app's Roboto.
+if (typeof Chart !== 'undefined') {
+  Chart.defaults.font.family = "Roboto, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+}
+
 // --- shared helpers --------------------------------------------------------
 function sanitiseLabel(s) {
   return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
