@@ -140,11 +140,9 @@ function captureApp(cfg) {
     lightbox: { present: false, channel: null, illuminant: '', intensity: 0, illuminants: {} },
     busy: false,
     error: '',
-    uploadMsg: '',
     hflip: false,
     vflip: false,
     previewTick: 0,  // bumped to reconnect the MJPEG <img> after a camera reconfigure
-    viewer: { open: false, src: '', filename: '', developed: false },  // captured-image popup
 
     async init() {
       this.updateCounts();
@@ -365,6 +363,40 @@ function captureApp(cfg) {
       }
     },
 
+    checklist() {
+      const alscCts = new Set(this.captures.filter((c) => c.image_type === 'alsc').map((c) => c.colour_temp));
+      const macCts = new Set(this.captures.filter((c) => c.image_type === 'macbeth').map((c) => c.colour_temp));
+      const mac = this.counts.macbeth;
+      return [
+        { key: 'alsc-temps', label: 'ALSC flat-fields at ≥2 colour temperatures',
+          detail: `${alscCts.size} temps`, done: alscCts.size >= 2 },
+        { key: 'mac-count', label: 'At least 3 Macbeth chart images',
+          detail: `${mac} shots`, done: mac >= 3 },
+        { key: 'mac-spread', label: 'Macbeth across ≥3 illuminants/temperatures',
+          detail: `${macCts.size} temps`, done: macCts.size >= 3 },
+      ];
+    },
+
+    pct(v) { return ((v || 0) * 100).toFixed(1) + '%'; },
+  };
+}
+
+// --- images page -----------------------------------------------------------
+function imagesApp(cfg) {
+  return {
+    ...createLoupe({ imgId: 'imgsViewerImg', canvasId: 'imgsViewerLoupe', markerId: 'imgsViewerMarker' }),
+    project: cfg.project,
+    captures: cfg.captures || [],
+    busy: false,
+    uploadMsg: '',
+    viewer: { open: false, src: '', filename: '', developed: false },
+
+    // Grid thumbnails: half-size develop for DNG-only captures (full-res is too
+    // slow on a Pi); saved JPEGs are served as-is and scaled by the browser.
+    thumbSrc(c) {
+      return `/projects/${this.project}/captures/${encodeURIComponent(c.filename)}/jpeg?thumb=1`;
+    },
+
     async uploadFiles(e) {
       const files = Array.from(e.target.files || []);
       e.target.value = '';  // let the same file be re-selected later
@@ -382,7 +414,6 @@ function captureApp(cfg) {
           if (idx >= 0) this.captures.splice(idx, 1, entry);
           else this.captures.unshift(entry);
         }
-        this.updateCounts();
         const parts = [];
         if (d.added && d.added.length) parts.push(`Added ${d.added.length}.`);
         if (d.skipped && d.skipped.length) {
@@ -398,10 +429,7 @@ function captureApp(cfg) {
 
     async remove(filename) {
       const r = await fetch(`/projects/${this.project}/captures/${encodeURIComponent(filename)}/delete`, { method: 'POST' });
-      if (r.ok) {
-        this.captures = this.captures.filter((c) => c.filename !== filename);
-        this.updateCounts();
-      }
+      if (r.ok) this.captures = this.captures.filter((c) => c.filename !== filename);
     },
 
     openViewer(c) {
@@ -412,32 +440,13 @@ function captureApp(cfg) {
         developed: c.jpeg === 'dng',
         src: `/projects/${this.project}/captures/${encodeURIComponent(c.filename)}/jpeg`,
       };
-      // Reuse the single loupe for the modal image while it's open.
-      this._loupeIds = { img: 'viewerImg', canvas: 'viewerLoupe', marker: 'viewerMarker' };
     },
 
     closeViewer() {
       this.viewer.open = false;
       this.viewer.src = '';  // free the (large) decoded image
       this.loupe.active = false;
-      this._loupeIds = { img: 'previewImg', canvas: 'loupeCanvas', marker: 'loupeMarker' };
     },
-
-    checklist() {
-      const alscCts = new Set(this.captures.filter((c) => c.image_type === 'alsc').map((c) => c.colour_temp));
-      const macCts = new Set(this.captures.filter((c) => c.image_type === 'macbeth').map((c) => c.colour_temp));
-      const mac = this.counts.macbeth;
-      return [
-        { key: 'alsc-temps', label: 'ALSC flat-fields at ≥2 colour temperatures',
-          detail: `${alscCts.size} temps`, done: alscCts.size >= 2 },
-        { key: 'mac-count', label: 'At least 3 Macbeth chart images',
-          detail: `${mac} shots`, done: mac >= 3 },
-        { key: 'mac-spread', label: 'Macbeth across ≥3 illuminants/temperatures',
-          detail: `${macCts.size} temps`, done: macCts.size >= 3 },
-      ];
-    },
-
-    pct(v) { return ((v || 0) * 100).toFixed(1) + '%'; },
   };
 }
 

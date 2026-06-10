@@ -161,38 +161,13 @@
     <div class="banner error mt" x-show="error" x-text="error" x-cloak></div>
   </div>
 
-  <!-- Full width: captured images -->
-  <div class="card mt">
-    <div class="card-head">
-      <h2>Captured images (<span x-text="captures.length"></span>)</h2>
-      <label class="btn ghost" :class="{ disabled: busy }">
-        <span x-text="busy ? 'Uploading…' : '⬆ Upload images'"></span>
-        <input type="file" multiple accept=".dng" @change="uploadFiles($event)" :disabled="busy" hidden>
-      </label>
-    </div>
-    <p class="hint">Upload existing <code>.dng</code> files — they're auto-tagged from the filename
-      (<code>&lt;label&gt;_&lt;K&gt;k_&lt;lux&gt;l.dng</code>, <code>alsc_&lt;K&gt;k_&lt;n&gt;.dng</code>, <code>cac_&lt;K&gt;k_&lt;n&gt;.dng</code>).</p>
-    <div class="banner error mt" x-show="uploadMsg" x-text="uploadMsg" x-cloak></div>
-    <div class="shot-grid" x-show="captures.length">
-      <template x-for="c in captures" :key="c.filename">
-        <div class="shot" :class="{invalid: !c.valid, clickable: c.jpeg}" @click="c.jpeg && openViewer(c)">
-          <button class="btn sm danger x" @click.stop="remove(c.filename)">✕</button>
-          <div class="fname" x-text="c.filename"></div>
-          <div class="meta">
-            <span class="chip" :class="c.image_type" x-text="c.image_type"></span>
-            <span class="chip" x-text="c.colour_temp + 'K'"></span>
-            <template x-if="c.lux"><span class="chip" x-text="c.lux + ' lx'"></span></template>
-            <template x-if="c.jpeg === 'saved'"><span class="chip jpeg">JPEG</span></template>
-          </div>
-        </div>
-      </template>
-    </div>
-    <div class="empty" x-show="!captures.length"><div class="big">🎞️</div>No images captured yet.</div>
-  </div>
-
   <!-- Full width: coverage checklist -->
   <div class="card mt">
-    <div class="card-head"><h2>Coverage checklist</h2></div>
+    <div class="card-head">
+      <h2>Coverage checklist</h2>
+      <span class="hint" style="margin:0">Captured images (<span x-text="captures.length"></span>) are managed on the
+        <a href="{{ url_for('images_page', name=project.name) }}">Images</a> tab.</span>
+    </div>
     <div class="stats mt" style="margin-top:0">
       <div class="stat"><div class="n" x-text="counts.macbeth"></div><div class="l">Macbeth</div></div>
       <div class="stat"><div class="n" x-text="counts.alsc"></div><div class="l">ALSC</div></div>
@@ -209,24 +184,6 @@
     </ul>
   </div>
 
-  <!-- Captured-image viewer (popup), shown when a box with a JPEG is clicked -->
-  <div class="viewer-backdrop" x-show="viewer.open" x-cloak
-       @click.self="closeViewer()" @keydown.escape.window="closeViewer()">
-    <div class="viewer-box">
-      <button class="btn sm ghost viewer-close" @click="closeViewer()">✕</button>
-      <div class="preview-wrap" :class="{ louping: loupe.active }" @dragstart.prevent
-           @pointerdown="loupeStart($event)" @pointermove="loupeMove($event)"
-           @pointerup="loupeEnd($event)" @pointerleave="loupeEnd($event)" @pointercancel="loupeEnd($event)">
-        <img id="viewerImg" draggable="false" :src="viewer.src" alt="captured image">
-        <div id="viewerMarker" class="loupe-marker" x-show="loupe.active" x-cloak></div>
-        <canvas id="viewerLoupe" class="loupe" width="220" height="220" x-show="loupe.active" x-cloak></canvas>
-      </div>
-      <div class="viewer-name">
-        <span x-text="viewer.filename"></span>
-        <span class="muted" x-show="viewer.developed"> · developed from DNG (rawpy preview)</span>
-      </div>
-    </div>
-  </div>
 </div>
 {% endblock %}
 {% block scripts %}

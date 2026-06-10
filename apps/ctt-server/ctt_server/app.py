@@ -183,6 +183,11 @@ def create_app(workspace_root: str | None = None) -> Flask:
             counts=proj.counts(),
         )
 
+    @app.route('/projects/<name>/images')
+    def images_page(name: str):
+        proj = get_project_or_404(name)
+        return render_template('images.html', project=proj, captures=_serialise_captures(proj))
+
     # --- camera API --------------------------------------------------------
     @app.route('/api/health')
     def api_health():
@@ -357,8 +362,13 @@ def create_app(workspace_root: str | None = None) -> Flask:
     @app.route('/projects/<name>/captures/<filename>/jpeg')
     def capture_jpeg(name: str, filename: str):
         """Serve a capture's preview JPEG: the saved sibling if present, else a
-        rawpy-developed preview of the DNG (won't match the ISP look)."""
+        rawpy-developed preview of the DNG (won't match the ISP look).
+
+        ?thumb=1 develops the DNG at half size with a lower JPEG quality — the
+        Images-tab grid would otherwise trigger a full-resolution develop per
+        thumbnail, which is far too slow on a Pi."""
         proj = get_project_or_404(name)
+        thumb = request.args.get('thumb') == '1'
         if not filename.endswith('.dng'):  # <filename> can't contain '/', so no traversal
             abort(404)
         jpg = (proj.path / filename).with_suffix('.jpg')
@@ -371,8 +381,9 @@ def create_app(workspace_root: str | None = None) -> Flask:
 
         try:
             with rawpy.imread(str(dng)) as raw:
-                rgb = raw.postprocess()
-            ok, buf = cv2.imencode('.jpg', cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 90])
+                rgb = raw.postprocess(half_size=thumb)
+            quality = 70 if thumb else 90
+            ok, buf = cv2.imencode('.jpg', cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, quality])
         except Exception:
             logger.exception('Failed to develop DNG preview for %s', filename)
             abort(500)

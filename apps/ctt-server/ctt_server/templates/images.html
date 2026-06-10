@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} · images · ctt-server{% endblock %}
+{% block body %}
+{% set active_tab = 'images' %}
+{% include '_project_tabs.html' %}
+
+<div x-data='imagesApp({
+        project: {{ project.name|tojson }},
+        captures: {{ captures|tojson }}
+     })'>
+
+  <div class="card">
+    <div class="card-head">
+      <h2>Images (<span x-text="captures.length"></span>)</h2>
+      <label class="btn ghost" :class="{ disabled: busy }">
+        <span x-text="busy ? 'Uploading…' : '⬆ Upload images'"></span>
+        <input type="file" multiple accept=".dng" @change="uploadFiles($event)" :disabled="busy" hidden>
+      </label>
+    </div>
+    <p class="hint">Upload existing <code>.dng</code> files — they're auto-tagged from the filename
+      (<code>&lt;label&gt;_&lt;K&gt;k_&lt;lux&gt;l.dng</code>, <code>alsc_&lt;K&gt;k_&lt;n&gt;.dng</code>, <code>cac_&lt;K&gt;k_&lt;n&gt;.dng</code>).</p>
+    <div class="banner error mt" x-show="uploadMsg" x-text="uploadMsg" x-cloak></div>
+
+    <div class="img-grid mt" x-show="captures.length">
+      <template x-for="c in captures" :key="c.filename">
+        <div class="img-card" :class="{ invalid: !c.valid }">
+          <div class="thumb" :class="{ clickable: c.jpeg }" @click="c.jpeg && openViewer(c)">
+            <template x-if="c.jpeg">
+              <img loading="lazy" draggable="false" :src="thumbSrc(c)" :alt="c.filename">
+            </template>
+            <div class="thumb-empty" x-show="!c.jpeg">no preview</div>
+            <button class="btn sm danger x" @click.stop="remove(c.filename)" title="Delete image">✕</button>
+          </div>
+          <div class="info">
+            <div class="fname" x-text="c.filename"></div>
+            <div class="meta">
+              <span class="chip" :class="c.image_type" x-text="c.image_type"></span>
+              <span class="chip" x-text="c.colour_temp + 'K'"></span>
+              <template x-if="c.lux"><span class="chip" x-text="c.lux + ' lx'"></span></template>
+              <template x-if="c.jpeg === 'saved'"><span class="chip jpeg">JPEG</span></template>
+              <template x-if="!c.valid"><span class="chip bad">invalid name</span></template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+    <div class="empty" x-show="!captures.length">
+      <div class="big">🎞️</div>No images yet — capture some on the
+      <a href="{{ url_for('project', name=project.name) }}">Capture</a> tab, or upload existing files.
+    </div>
+  </div>
+
+  <!-- Full-size image viewer (popup), shown when a thumbnail with a preview is clicked -->
+  <div class="viewer-backdrop" x-show="viewer.open" x-cloak
+       @click.self="closeViewer()" @keydown.escape.window="closeViewer()">
+    <div class="viewer-box">
+      <button class="btn sm ghost viewer-close" @click="closeViewer()">✕</button>
+      <div class="preview-wrap" :class="{ louping: loupe.active }" @dragstart.prevent
+           @pointerdown="loupeStart($event)" @pointermove="loupeMove($event)"
+           @pointerup="loupeEnd($event)" @pointerleave="loupeEnd($event)" @pointercancel="loupeEnd($event)">
+        <img id="imgsViewerImg" draggable="false" :src="viewer.src" alt="captured image">
+        <div id="imgsViewerMarker" class="loupe-marker" x-show="loupe.active" x-cloak></div>
+        <canvas id="imgsViewerLoupe" class="loupe" width="220" height="220" x-show="loupe.active" x-cloak></canvas>
+      </div>
+      <div class="viewer-name">
+        <span x-text="viewer.filename"></span>
+        <span class="muted" x-show="viewer.developed"> · developed from DNG (rawpy preview)</span>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/alpine.min.js') }}" defer></script>
+{% endblock %}
