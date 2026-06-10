@@ -111,11 +111,22 @@ class Camera:
         with open(filename, 'w') as logfile:
             logfile.write(str(self.log))
 
-    def add_imgs(self, directory: str, mac_config: tuple, blacklevel: int = -1) -> None:
+    def add_imgs(
+        self, directory: str, mac_config: tuple, blacklevel: int = -1, images: list[str] | None = None
+    ) -> None:
         self.log_new_sec('Image Loading', cal=False)
         logger.info(f'\nLoading images from {directory}')
         self.log += f'\nDirectory: {directory}'
         filename_list = get_photos(directory)
+        if images is not None:
+            # Restrict the run to an explicit image list (CLI --manifest, or the
+            # web UI's exclude-from-run); entries are bare filenames in directory.
+            wanted = set(images)
+            skipped = [f for f in filename_list if f not in wanted]
+            filename_list = [f for f in filename_list if f in wanted]
+            if skipped:
+                logger.info(f'Excluded: {len(skipped)}')
+                self.log += f'\nExcluded: {len(skipped)} ({", ".join(sorted(skipped))})'
         logger.info(f'Files found: {len(filename_list)}')
         self.log += f'\nFiles found: {len(filename_list)}'
         logger.info('Loading')

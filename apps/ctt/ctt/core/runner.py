@@ -78,6 +78,7 @@ def run_ctt(
     colour_only: bool = False,
     output_json_path: str | None = None,
     plot_cli: list[str] | None = None,
+    images: list[str] | None = None,
 ) -> None:
     if output_json_path is not None:
         json_output = output_json_path
@@ -171,13 +172,15 @@ def run_ctt(
         f'  Disable {disable_str}',
         f'  Plot    {plot_str}',
     ]
+    if images is not None:
+        summary_lines.append(f'  Images  {len(images)} selected')
     logger.info('\n' + '\n'.join(summary_lines) + '\n')
 
     try:
         cam = Camera(json_output, json=json_template)
         cam.output_dir = output_dir
         cam.log_user_input(json_output, directory, config, log_output)
-        cam.add_imgs(directory, mac_config, blacklevel)
+        cam.add_imgs(directory, mac_config, blacklevel, images=images)
         # Infer ALSC-only when only ALSC images present (e.g. mono LSC-only from DNGs).
         if len(cam.imgs) == 0 and len(cam.imgs_cac) == 0 and len(cam.imgs_alsc) > 0:
             alsc_only = True
@@ -380,12 +383,15 @@ def run_ctt_targets(
     template_path: str | None = None,
     update_path: str | None = None,
     plot_cli: list[str] | None = None,
+    images: list[str] | None = None,
 ) -> None:
     """Run a calibration for each target, resolving platform + template per target.
 
     The single entry point shared by the CLI and the web server: both supply
     inputs and let this drive the per-target loop. When ``update_path`` is set
     (CLI ``--update``) it is the template source *and* the in-place output file.
+    ``images`` optionally restricts the run to those filenames within
+    ``directory`` (default: every .dng found there).
     """
     for target in targets:
         platform = get_platform(target)
@@ -402,4 +408,5 @@ def run_ctt_targets(
             colour_only=colour_only,
             output_json_path=update_path,
             plot_cli=plot_cli,
+            images=images,
         )

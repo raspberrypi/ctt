@@ -2,6 +2,8 @@
 #
 # Copyright (C) 2026, Raspberry Pi
 
+import types
+
 import numpy as np
 
 from ctt.core.camera import _LogBuffer, get_col_lux
@@ -162,3 +164,35 @@ class TestWriteMetrics:
         bad = tmp_path / 'no_such_dir' / 'cam_pisp.json'
         runner._write_metrics(cam, str(bad), target='pisp', mode='Full', config={})
         assert not bad.parent.exists()
+
+
+# --- add_imgs image-list filtering ---
+
+
+class TestAddImgsImageFilter:
+    def _camera_with_dir(self, tmp_path, monkeypatch):
+        import ctt.core.camera as camera_mod
+
+        for n in ('alsc_3000k_0.dng', 'alsc_5000k_0.dng'):
+            (tmp_path / n).write_bytes(b'DNG')
+        # Stub the DNG loader: add_imgs only needs an object it can tag and append.
+        monkeypatch.setattr(
+            camera_mod, 'load_image', lambda cam, address, mac_config=None, mac=True: types.SimpleNamespace()
+        )
+        return camera_mod.Camera('out.json', json={})
+
+    def test_default_loads_all(self, tmp_path, monkeypatch):
+        cam = self._camera_with_dir(tmp_path, monkeypatch)
+        cam.add_imgs(str(tmp_path) + '/', (0, 0))
+        assert sorted(i.name for i in cam.imgs_alsc) == ['alsc_3000k_0.dng', 'alsc_5000k_0.dng']
+
+    def test_image_list_filters(self, tmp_path, monkeypatch):
+        cam = self._camera_with_dir(tmp_path, monkeypatch)
+        cam.add_imgs(str(tmp_path) + '/', (0, 0), images=['alsc_3000k_0.dng'])
+        assert [i.name for i in cam.imgs_alsc] == ['alsc_3000k_0.dng']
+        assert 'Excluded: 1' in str(cam.log)
+
+    def test_empty_image_list_loads_nothing(self, tmp_path, monkeypatch):
+        cam = self._camera_with_dir(tmp_path, monkeypatch)
+        cam.add_imgs(str(tmp_path) + '/', (0, 0), images=[])
+        assert cam.imgs_alsc == []

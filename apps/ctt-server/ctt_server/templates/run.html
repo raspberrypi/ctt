@@ -3,7 +3,7 @@
 {% block body %}
 {% set active_tab = 'run' %}
 {% include '_project_tabs.html' %}
-<p class="muted" style="margin:-12px 0 20px">{{ counts.macbeth }} Macbeth · {{ counts.alsc }} ALSC · {{ counts.cac }} CAC images</p>
+<p class="muted" style="margin:-12px 0 20px">{{ counts.macbeth }} Macbeth · {{ counts.alsc }} ALSC · {{ counts.cac }} CAC images{% if excluded_count %} · <span style="color:var(--warn)">{{ excluded_count }} excluded</span>{% endif %}</p>
 
 <div class="grid" x-data='runApp({ project: {{ project.name|tojson }} })'>
   <div class="card">

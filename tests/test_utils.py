@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 
 from ctt.utils.colorspace import rgb_to_lab
-from ctt.utils.tools import correlate, get_alsc_colour_cals, nudge_for_json, reshape
+from ctt.utils.errors import ArgError
+from ctt.utils.tools import correlate, get_alsc_colour_cals, nudge_for_json, read_manifest, reshape
 
 # --- nudge_for_json ---
 
@@ -137,3 +138,48 @@ class TestRgbToLab:
         rgb = np.array([[255, 0, 0], [0, 255, 0], [0, 0, 255]])
         lab = rgb_to_lab(rgb)
         assert lab.shape == (3, 3)
+
+
+# --- read_manifest ---
+
+
+class TestReadManifest:
+    def _dir_with(self, tmp_path, names):
+        for n in names:
+            (tmp_path / n).write_bytes(b'DNG')
+        return str(tmp_path)
+
+    def test_happy_path_comments_blanks_dedupe(self, tmp_path):
+        d = self._dir_with(tmp_path, ['a.dng', 'b.dng'])
+        m = tmp_path / 'manifest.txt'
+        m.write_text('# calibration subset\n\na.dng\nb.dng\na.dng\n')
+        assert read_manifest(str(m), d) == ['a.dng', 'b.dng']
+
+    def test_missing_file_named_in_error(self, tmp_path):
+        d = self._dir_with(tmp_path, ['a.dng'])
+        m = tmp_path / 'manifest.txt'
+        m.write_text('a.dng\nmissing.dng\n')
+        with pytest.raises(ArgError, match='missing.dng'):
+            read_manifest(str(m), d)
+
+    def test_path_entry_rejected(self, tmp_path):
+        m = tmp_path / 'manifest.txt'
+        m.write_text('sub/a.dng\n')
+        with pytest.raises(ArgError, match='bare filenames'):
+            read_manifest(str(m), str(tmp_path))
+
+    def test_non_dng_rejected(self, tmp_path):
+        m = tmp_path / 'manifest.txt'
+        m.write_text('a.jpg\n')
+        with pytest.raises(ArgError, match='.dng'):
+            read_manifest(str(m), str(tmp_path))
+
+    def test_empty_manifest_rejected(self, tmp_path):
+        m = tmp_path / 'manifest.txt'
+        m.write_text('# nothing here\n\n')
+        with pytest.raises(ArgError, match='lists no images'):
+            read_manifest(str(m), str(tmp_path))
+
+    def test_unreadable_manifest(self, tmp_path):
+        with pytest.raises(ArgError, match='Could not read'):
+            read_manifest(str(tmp_path / 'nope.txt'), str(tmp_path))

@@ -54,6 +54,7 @@ class Capture:
     label: str | None = None
     controls: dict = field(default_factory=dict)
     captured_at: str = field(default_factory=_now_iso)
+    excluded: bool = False  # excluded from CTT runs; the file stays on disk
 
 
 class Project:
@@ -187,6 +188,15 @@ class Project:
             target.with_suffix('.jpg').unlink(missing_ok=True)  # remove the sibling preview JPEG
         self.captures = [c for c in self.captures if c.filename != filename]
         self.save()
+
+    def set_excluded(self, filename: str, excluded: bool) -> Capture:
+        """Mark a capture as excluded from (or included in) CTT runs; persists."""
+        for c in self.captures:
+            if c.filename == filename:
+                c.excluded = excluded
+                self.save()
+                return c
+        raise KeyError(filename)
 
     def has_saved_jpeg(self, filename: str) -> bool:
         """True if a sibling preview JPEG exists for this capture's DNG."""

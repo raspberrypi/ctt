@@ -9,6 +9,8 @@ import os
 import cv2
 import numpy as np
 
+from .errors import ArgError
+
 
 def nudge_for_json(arr: np.ndarray, decimals: int = 3) -> np.ndarray:
     """
@@ -71,6 +73,40 @@ def get_photos(directory: str = 'photos') -> list[str]:
         if os.path.isfile(path) and filename.lower().endswith('.dng'):
             filename_list.append(filename)
     return filename_list
+
+
+def read_manifest(manifest_path: str, input_dir: str) -> list[str]:
+    """Parse a run manifest: one .dng filename per line, relative to input_dir.
+
+    Blank lines and lines starting with '#' are ignored; duplicates are removed
+    preserving order. Raises ArgError if the manifest cannot be read, an entry
+    contains a path or is not a .dng, a listed file is missing from input_dir,
+    or no images remain.
+    """
+    try:
+        with open(manifest_path) as f:
+            lines = f.readlines()
+    except OSError as err:
+        raise ArgError(f'\n\nError: Could not read manifest file: {err}') from err
+
+    images = []
+    for line in lines:
+        entry = line.strip()
+        if not entry or entry.startswith('#'):
+            continue
+        if '/' in entry or '\\' in entry:
+            raise ArgError(f'\n\nError: Manifest entries must be bare filenames, got: {entry!r}')
+        if not entry.lower().endswith('.dng'):
+            raise ArgError(f'\n\nError: Manifest entries must be .dng files, got: {entry!r}')
+        if entry not in images:
+            images.append(entry)
+
+    if not images:
+        raise ArgError(f'\n\nError: Manifest {manifest_path} lists no images')
+    missing = [f for f in images if not os.path.isfile(os.path.join(input_dir, f))]
+    if missing:
+        raise ArgError(f'\n\nError: Manifest images not found in {input_dir}: {", ".join(missing)}')
+    return images
 
 
 def reshape(img: np.ndarray, width: int) -> tuple[np.ndarray, float]:
