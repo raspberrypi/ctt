@@ -228,6 +228,7 @@ def parse_tuning_file(path: str | Path, metrics_path: str | Path | None = None) 
             'coverage': raw_metrics.get('coverage', {}),
             'config': raw_metrics.get('config', {}),
             'lux': raw_metrics.get('lux', {}),
+            'alsc': raw_metrics.get('alsc', {}),
         }
         if ccm_default:
             metrics['ccm_default'] = sorted(ccm_default, key=lambda c: c.get('ct', 0))

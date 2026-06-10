@@ -169,3 +169,20 @@ def test_parse_with_corrupt_sidecar(tmp_path):
     metrics_path.write_text('{ not valid json')
     out = results.parse_tuning_file(json_path, metrics_path)
     assert 'metrics' not in out
+
+
+def test_parse_passes_alsc_residual_metrics(tmp_path):
+    json_path = _write_tuning(tmp_path)
+    sidecar = {
+        'alsc': {
+            'luminance_strength': 0.8,
+            'residuals': [{'name': 'alsc_5000k_0.dng', 'ct': 5000, 'corner_pct': 9.8, 'worst_pct': 11.2}],
+            'corner_pct_max': 9.8,
+            'worst_pct_max': 11.2,
+        },
+    }
+    metrics_path = tmp_path / 'cam_pisp_metrics.json'
+    metrics_path.write_text(json.dumps(sidecar))
+    m = results.parse_tuning_file(json_path, metrics_path)['metrics']
+    assert m['alsc']['corner_pct_max'] == 9.8
+    assert m['alsc']['residuals'][0]['ct'] == 5000
