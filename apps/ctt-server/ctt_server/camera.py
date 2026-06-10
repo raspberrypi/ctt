@@ -256,6 +256,25 @@ class Picamera2Camera:
             'saturated': self._chart_saturated(arr, corners),
         }
 
+    def chart_patches(self) -> dict:
+        """Locate the chart and return the current frame plus patch centres.
+
+        Used by the live colour-accuracy check: the caller samples the patch
+        colours from the returned (ISP-processed, BGR-ordered) frame.
+        """
+        from ctt.detection.macbeth import locate_chart  # noqa: PLC0415
+
+        with self._lock:
+            arr = self._picam2.capture_array('main')
+        try:
+            res = locate_chart(arr)
+        except Exception:  # detection is best-effort; never fail the request
+            res = None
+        if res is None:
+            return {'found': False}
+        corners, centres, conf = res
+        return {'found': True, 'confidence': round(conf, 3), 'centres': centres, 'frame': arr}
+
     # Fraction of the chart region that may clip before we flag over-exposure. The
     # bright (white/grey) patches are a small part of the chart, so a low threshold
     # catches them; CTT itself rejects a capture if any patch saturates.

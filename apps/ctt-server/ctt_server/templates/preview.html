@@ -71,8 +71,8 @@
     </div>
   </div>
 
-  <!-- Exposure + lightbox controls, side by side -->
-  <div class="grid mt" style="grid-template-columns: 1fr 1fr">
+  <!-- Exposure + lightbox controls, side by side (exposure full width without a lightbox) -->
+  <div class="grid mt" :style="lightbox.present ? 'grid-template-columns: 1fr 1fr' : 'grid-template-columns: 1fr'">
     <!-- Exposure controls -->
     <div class="card" x-show="testing" x-cloak>
       <div class="card-head"><h2>Exposure</h2>
@@ -129,6 +129,42 @@
       </div>
     </div>
   </div>
+  <!-- Measured colour accuracy (semi-live, through the real ISP) -->
+  <div class="card mt" x-show="testing" x-cloak>
+    <div class="card-head">
+      <h2>Measured colour accuracy</h2>
+      <div class="flex">
+        <span class="chip" x-show="liveColour && chartSeen" x-cloak>
+          ● chart · conf <span x-text="chartSeen && chartSeen.confidence"></span>
+        </span>
+        <span class="chip" x-show="liveColour && chartSeen === false" x-cloak>chart not detected</span>
+        <label class="flex" style="margin:0;font-weight:600">
+          <input type="checkbox" style="width:auto" x-model="liveColour" @change="liveColour && pollColour()"> Live
+        </label>
+      </div>
+    </div>
+    <p class="muted" x-show="!colour" x-cloak>
+      Point the camera at a Macbeth chart — the measurement updates automatically while it is detected.
+    </p>
+    <div class="stats" x-show="colour">
+      <div class="stat">
+        <div class="n">
+          <span x-text="colour && colour.colour"></span>
+          <span class="muted" style="font-size:0.85rem" x-text="'mean ' + (colour && colour.mean) + ' · worst ' + (colour && colour.worst)"></span>
+        </div>
+        <div class="l" x-text="'Colour ΔE — ' + (testKind === 'standard' ? 'existing' : 'tuned') + ' tuning'"></div>
+      </div>
+    </div>
+    <div class="banner info mt" x-show="colour && colour.saturated" x-cloak>
+      ⚠ Some patches are clipping — reduce exposure.
+    </div>
+    <div class="chart-box mt" x-show="colour"><canvas id="liveDeChart"></canvas></div>
+    <p class="hint">ΔE (CIE2000) per Macbeth patch, measured live through the real ISP with the selected
+      tuning loaded — each bar is the patch's reference colour. The headline <b>colour ΔE</b> removes the
+      overall-brightness offset, like the calibration metric. Absolute values depend on the illuminant, so
+      judge changes under the same light rather than against fixed thresholds.</p>
+  </div>
+
 </div>
 {% endif %}
 {% endblock %}
