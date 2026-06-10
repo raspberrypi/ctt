@@ -52,7 +52,7 @@
   <!-- AWB curve + ALSC falloff -->
   <div class="grid cols-2 mt" style="align-items: stretch">
 
-    <div class="card" x-show="charts.awb" x-cloak>
+    <div class="card fill-chart" x-show="charts.awb" x-cloak>
       <div class="card-head"><h2>AWB CT curve</h2></div>
       <div class="chart-box compact"><canvas id="awbChart"></canvas></div>
       <p class="hint">White-balance locus — R/G against B/G across the calibrated colour-temperature range (hover for the CT).</p>
@@ -75,6 +75,18 @@
           <span>B <b x-text="fmt(alscHover && alscHover.b)"></b></span>
         </div>
       </div>
+      <template x-if="metrics && metrics.alsc && metrics.alsc.residuals && metrics.alsc.residuals.length">
+        <div>
+          <div class="stats compact mt">
+            <div class="stat"><div class="n" x-text="metrics.alsc.corner_pct_max + '%'"></div><div class="l">Corner residual</div></div>
+            <div class="stat"><div class="n" x-text="metrics.alsc.worst_pct_max + '%'"></div><div class="l">Worst residual</div></div>
+            <div class="stat"><div class="n" x-text="metrics.alsc.luminance_strength"></div><div class="l">Strength</div></div>
+          </div>
+          <p class="hint">Predicted luminance non-uniformity of the flat-fields <em>after</em> this correction
+            (worst capture across colour temperatures). With strength &lt; 1 some residual is by design —
+            corners are deliberately left slightly darker to limit noise amplification.</p>
+        </div>
+      </template>
     </div>
   </div>
 

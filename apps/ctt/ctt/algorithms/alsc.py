@@ -65,7 +65,7 @@ class AlscCalibration(CalibrationAlgorithm):
 
         do_plot = self.json_key in getattr(cam, 'plot', [])
         cal_cr_list, cal_cb_list, luminance_lut = alsc_all(
-            cam, do_alsc_colour, grid_size, max_gain=max_gain, plot=do_plot
+            cam, do_alsc_colour, grid_size, max_gain=max_gain, plot=do_plot, luminance_strength=luminance_strength
         )
 
         if not do_alsc_colour:
@@ -102,6 +102,7 @@ def alsc_all(
     grid_size: tuple[int, int] = (16, 12),
     max_gain: float = 8.0,
     plot: bool = False,
+    luminance_strength: float = 0.8,
 ) -> tuple:
     """Perform ALSC calibration on a set of images."""
     imgs_alsc = cam.imgs_alsc
@@ -176,6 +177,19 @@ def alsc_all(
     l_cen = round(l_cen / 4, 3)
     cam.log += f'\nLuminance table centre: {l_cen}'
 
+    # Predict the post-correction uniformity: apply the (single, averaged) table
+    # back to each flat-field at the runtime strength, and record the residuals.
+    names = [img.name for img in imgs_alsc]
+    residuals = alsc_residuals(list_cg, list_col, names, lum_lut, grid_size, luminance_strength)
+    for r in residuals:
+        cam.log += f'\nResidual after correction ({r["name"]}): corners {r["corner_pct"]}%  worst {r["worst_pct"]}%'
+    cam.metrics['alsc'] = {
+        'luminance_strength': luminance_strength,
+        'residuals': residuals,
+        'corner_pct_max': max((r['corner_pct'] for r in residuals), default=None),
+        'worst_pct_max': max((r['worst_pct'] for r in residuals), default=None),
+    }
+
     if plot and len(imgs_alsc) > 0:
         # Plot first image's grids as 3D surfaces.
         cr = np.reshape(list_cr[0], (grid_h, grid_w))
@@ -200,6 +214,43 @@ def alsc_all(
         plt.show()
 
     return cal_cr_list, cal_cb_list, lum_lut
+
+
+def alsc_residuals(
+    list_cg: np.ndarray,
+    list_col: np.ndarray,
+    names: list[str],
+    lum_lut: list,
+    grid_size: tuple[int, int],
+    luminance_strength: float,
+) -> list[dict]:
+    """Predicted luminance non-uniformity of each flat-field after correction.
+
+    Each image's measured relative illumination (the inverse of its cg table)
+    is corrected with the final averaged LUT at the runtime strength
+    (gain = 1 + strength * (table - 1)), then compared against the centre of
+    the corrected image. With strength < 1 a residual is expected by design;
+    per-CT spread shows what the single shared LUT costs at each illuminant.
+    """
+    grid_w, grid_h = grid_size
+    gain = 1 + luminance_strength * (np.array(lum_lut) - 1)
+    mid = (grid_h // 2 - 1) * grid_w + (grid_w // 2 - 1)
+    centre_idx = [mid, mid + 1, mid + grid_w, mid + grid_w + 1]
+    corner_idx = [0, grid_w - 1, grid_w * grid_h - 1, grid_w * (grid_h - 1)]
+    out = []
+    for cg, col, name in zip(list_cg, list_col, names, strict=True):
+        measured = 1.0 / np.asarray(cg, dtype=np.float64)  # relative illumination per cell
+        corrected = measured * gain
+        deviation = corrected / corrected[centre_idx].mean() - 1.0
+        out.append(
+            {
+                'name': name,
+                'ct': int(col),
+                'corner_pct': round(float(np.mean(np.abs(deviation[corner_idx]))) * 100, 1),
+                'worst_pct': round(float(np.max(np.abs(deviation))) * 100, 1),
+            }
+        )
+    return out
 
 
 def alsc(
