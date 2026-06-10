@@ -331,17 +331,24 @@ class Picamera2Camera:
         return data, meta
 
     def capture_still(self, quality: int = 95) -> tuple[bytes, bytes, dict]:
-        """Capture one full-resolution frame as BOTH a DNG and a JPEG.
+        """Capture one full-resolution frame as BOTH a DNG and a JPEG."""
+        return self.capture_burst(1, quality=quality)[0]
+
+    def capture_burst(self, frames: int, quality: int = 95) -> list[tuple[bytes, bytes, dict]]:
+        """Capture a burst of full-resolution frames, each as a DNG + JPEG.
 
         The running video config has a full-resolution raw stream but only a
-        preview-size main stream, so a full-res JPEG needs a still mode. We switch
-        to a full-sensor still configuration (full main + full raw), grab a single
-        request, and produce the DNG from the raw stream and the JPEG from the main
-        stream of that same frame -- so the two match exactly -- then switch back to
-        the preview config. This costs a brief preview blip, like capture_png().
+        preview-size main stream, so full-res JPEGs need a still mode. We switch
+        to a full-sensor still configuration (full main + full raw) once, grab
+        the requests back to back, and produce each frame's DNG from its raw
+        stream and JPEG from its main stream -- so the pairs match exactly --
+        then switch back to the preview config. This costs a brief preview
+        blip, like capture_png().
         """
         import cv2  # noqa: PLC0415
 
+        frames = max(1, min(int(frames), 16))
+        shots = []
         with self._lock:
             still = self._picam2.create_still_configuration(
                 main={'size': self.resolution, 'format': 'RGB888'},
@@ -349,27 +356,34 @@ class Picamera2Camera:
                 transform=self._transform(),
             )
             self._picam2.switch_mode(still)
-            request = self._picam2.capture_request()
             try:
-                with tempfile.TemporaryDirectory() as tmp:
-                    path = Path(tmp) / 'capture.dng'
-                    request.save_dng(str(path))
-                    dng = path.read_bytes()
-                arr = request.make_array('main')  # full-res RGB888 (BGR-ordered = cv2 native)
-                metadata = request.get_metadata()
+                for _ in range(frames):
+                    request = self._picam2.capture_request()
+                    try:
+                        with tempfile.TemporaryDirectory() as tmp:
+                            path = Path(tmp) / 'capture.dng'
+                            request.save_dng(str(path))
+                            dng = path.read_bytes()
+                        arr = request.make_array('main')  # full-res RGB888 (BGR-ordered = cv2 native)
+                        metadata = request.get_metadata()
+                    finally:
+                        request.release()
+                    shots.append((dng, arr, metadata))
             finally:
-                request.release()
                 self._picam2.switch_mode(self._video_config())
-        ok, buf = cv2.imencode('.jpg', arr, [cv2.IMWRITE_JPEG_QUALITY, quality])
-        if not ok:
-            raise CameraError('Failed to encode capture JPEG')
-        meta = {
-            'exposure': int(metadata.get('ExposureTime', 0)),
-            'gain': round(float(metadata.get('AnalogueGain', 0.0)), 3),
-            'colour_temp': int(metadata.get('ColourTemperature', 0)),
-            'lux': round(float(metadata.get('Lux', 0.0)), 1),
-        }
-        return dng, buf.tobytes(), meta
+        out = []
+        for dng, arr, metadata in shots:
+            ok, buf = cv2.imencode('.jpg', arr, [cv2.IMWRITE_JPEG_QUALITY, quality])
+            if not ok:
+                raise CameraError('Failed to encode capture JPEG')
+            meta = {
+                'exposure': int(metadata.get('ExposureTime', 0)),
+                'gain': round(float(metadata.get('AnalogueGain', 0.0)), 3),
+                'colour_temp': int(metadata.get('ColourTemperature', 0)),
+                'lux': round(float(metadata.get('Lux', 0.0)), 1),
+            }
+            out.append((dng, buf.tobytes(), meta))
+        return out
 
     def health(self) -> dict:
         return {

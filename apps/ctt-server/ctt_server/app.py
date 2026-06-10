@@ -362,6 +362,9 @@ def create_app(workspace_root: str | None = None) -> Flask:
 
     @app.route('/projects/<name>/capture', methods=['POST'])
     def capture(name: str):
+        """Capture a still — or a burst of `frames` stills, saved as indexed
+        files (alsc_5000k_0/1/2..., d65_5000k_800l_0/1/2...) which CTT averages
+        internally during a run."""
         proj = get_project_or_404(name)
         body = request.get_json(force=True) or {}
         image_type = body.get('image_type')
@@ -369,25 +372,38 @@ def create_app(workspace_root: str | None = None) -> Flask:
             colour_temp = int(body.get('colour_temp'))
             lux = int(body['lux']) if body.get('lux') not in (None, '') else None
             label = body.get('label') or None
-            dng_bytes, jpg_bytes, meta = get_shared_camera().capture_still()
-            cap = proj.add_capture(
-                dng_bytes, image_type, colour_temp, lux=lux, label=label, controls=meta, jpeg_bytes=jpg_bytes
-            )
+            frames = max(1, min(int(body.get('frames', 1) or 1), 16))
+            shots = get_shared_camera().capture_burst(frames)
+            caps = [
+                proj.add_capture(
+                    dng_bytes,
+                    image_type,
+                    colour_temp,
+                    lux=lux,
+                    label=label,
+                    controls=meta,
+                    jpeg_bytes=jpg_bytes,
+                    indexed=frames > 1,  # burst frames get _<n> names; singles keep overwrite semantics
+                )
+                for dng_bytes, jpg_bytes, meta in shots
+            ]
         except CameraError as err:
             return jsonify({'error': str(err)}), 503
         except (TypeError, ValueError) as err:
             return jsonify({'error': str(err)}), 400
-        return jsonify(
+        added = [
             {
                 'filename': cap.filename,
                 'image_type': cap.image_type,
                 'colour_temp': cap.colour_temp,
                 'lux': cap.lux,
                 'label': cap.label,
+                'valid': True,
                 'jpeg': 'saved',  # a fresh capture always has a full-res JPEG
-                'counts': proj.counts(),
             }
-        )
+            for cap in caps
+        ]
+        return jsonify({'added': added, 'counts': proj.counts()})
 
     @app.route('/projects/<name>/upload', methods=['POST'])
     def upload(name: str):

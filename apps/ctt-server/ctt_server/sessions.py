@@ -118,16 +118,22 @@ class Project:
         label: str | None = None,
         controls: dict | None = None,
         jpeg_bytes: bytes | None = None,
+        indexed: bool = False,
     ) -> Capture:
         """Write a DNG with a CTT-correct filename and record its metadata.
 
         If jpeg_bytes is given, a full-resolution JPEG is written alongside the DNG
         under the same stem (e.g. foo.dng -> foo.jpg) for in-browser preview.
+        indexed=True gives Macbeth captures a _<n> suffix (burst frames; CTT
+        averages same-name groups internally); ALSC/CAC are always indexed.
         """
         # Macbeth filenames are prefixed with the project (sensor) name by default.
         if image_type == 'macbeth' and not label:
             label = self.name
-        index = naming.next_index(self._dng_names(), image_type, colour_temp)
+        if image_type == 'macbeth' and not indexed:
+            index = None  # index-free name: capturing again overwrites
+        else:
+            index = naming.next_index(self._dng_names(), image_type, colour_temp, lux=lux, label=label)
         filename = naming.build_filename(image_type, colour_temp, lux=lux, label=label, index=index)
         self.path.mkdir(parents=True, exist_ok=True)
         (self.path / filename).write_bytes(dng_bytes)

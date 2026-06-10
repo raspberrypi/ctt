@@ -34,6 +34,8 @@ class Image:
     cen_coords: list | None = None
     macbeth_confidence: float | None = None
     patch_size: int | None = None
+    frames_averaged: int = 1  # burst frames averaged into this image (in-CTT, by filename group)
+    patches_single: list | None = None  # patches from one burst frame (true noise statistics)
     ver: int = 0
 
     def get_patches(self, cen_coords: list, size: int | None = None) -> int:

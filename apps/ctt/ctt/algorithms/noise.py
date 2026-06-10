@@ -45,7 +45,12 @@ class NoiseCalibration(CalibrationAlgorithm):
 
 def noise(cam: Camera, img: Image, plot: bool = False) -> list:
     cam.log += f'\nProcessing image: {img.name}'
-    all_patches = np.array([p for ch in img.patches for p in ch], dtype=float)
+    # Burst-averaged images understate the sensor noise; use the single-frame
+    # patches that the loader sampled at the same chart coordinates instead.
+    patches = img.patches_single if getattr(img, 'patches_single', None) else img.patches
+    if patches is not img.patches:
+        cam.log += '\nUsing single-frame patches (burst-averaged image)'
+    all_patches = np.array([p for ch in patches for p in ch], dtype=float)
     all_patches = (all_patches - img.blacklevel_16) / img.againQ8_norm
     stds = np.std(all_patches, axis=1)
     means = np.clip(np.mean(all_patches, axis=1), 0, None)

@@ -9,6 +9,7 @@
 #
 #   ALSC flat-field:  alsc_<K>k_<idx>.dng        e.g. alsc_5000k_0.dng
 #   Macbeth chart:    <label>_<K>k_<lux>l.dng    e.g. d65_5858k_1344l.dng
+#   Macbeth burst:    <label>_<K>k_<lux>l_<idx>.dng (frames CTT averages internally)
 #   CAC dot chart:    cac_<K>k_<idx>.dng          e.g. cac_5000k_0.dng
 #
 # We reuse get_col_lux as the single source of truth: every name we build is
@@ -42,7 +43,7 @@ def build_filename(
     *,
     lux: int | None = None,
     label: str | None = None,
-    index: int = 0,
+    index: int | None = None,
 ) -> str:
     """Build a CTT-compatible .dng filename for the given image type and tags.
 
@@ -56,9 +57,9 @@ def build_filename(
         raise NamingError(f'Colour temperature must be a positive integer Kelvin, got {colour_temp!r}')
 
     if image_type == 'alsc':
-        name = f'alsc_{colour_temp}k_{index}.dng'
+        name = f'alsc_{colour_temp}k_{index or 0}.dng'
     elif image_type == 'cac':
-        name = f'cac_{colour_temp}k_{index}.dng'
+        name = f'cac_{colour_temp}k_{index or 0}.dng'
     else:  # macbeth
         if lux is None or lux <= 0:
             raise NamingError('Macbeth images require a positive lux value')
@@ -70,7 +71,11 @@ def build_filename(
                 f'Macbeth label {clean!r} must not contain {_RESERVED_SUBSTRINGS} '
                 '(it would be misdetected as an ALSC/CAC image)'
             )
-        name = f'{clean}_{colour_temp}k_{lux}l.dng'
+        # Burst frames get an index suffix (CTT averages same-name groups
+        # internally); single captures keep the index-free name, preserving the
+        # capture-again-to-overwrite behaviour.
+        suffix = f'_{index}' if index is not None else ''
+        name = f'{clean}_{colour_temp}k_{lux}l{suffix}.dng'
 
     _verify(name, image_type, colour_temp, lux)
     return name
@@ -131,9 +136,23 @@ def parse_filename(filename: str) -> tuple[str, int, int | None, str | None]:
     return image_type, colour_temp, lux, label
 
 
-def next_index(existing: list[str], image_type: str, colour_temp: int) -> int:
-    """Return the next free replicate index for an ALSC/CAC name at this colour temp."""
-    prefix = f'{image_type}_{colour_temp}k_'
+def next_index(
+    existing: list[str],
+    image_type: str,
+    colour_temp: int,
+    *,
+    lux: int | None = None,
+    label: str | None = None,
+) -> int:
+    """Return the next free replicate index for a name with these tags.
+
+    ALSC/CAC names are always indexed; Macbeth names only in burst mode, where
+    the prefix includes the label and lux (e.g. d65_5000k_800l_).
+    """
+    if image_type == 'macbeth':
+        prefix = f'{sanitise_label(label or "mac")}_{colour_temp}k_{lux}l_'
+    else:
+        prefix = f'{image_type}_{colour_temp}k_'
     used = []
     for name in existing:
         if name.startswith(prefix) and name.endswith('.dng'):

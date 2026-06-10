@@ -134,52 +134,91 @@ def _chart_size_warning(corners: np.ndarray, image_width: float) -> str | None:
     return None
 
 
+def _detect_macbeth(cam: Camera, img: Image, mac_config: tuple | None, name: str) -> bool:
+    """Locate the chart in img and sample its patches. False = image unusable."""
+    av_chan = np.mean(np.array(img.channels), axis=0) / (2**16)
+    av_val = np.mean(av_chan)
+    if av_val < img.blacklevel_16 / (2**16) + 1 / 64:
+        result = None
+        logger.error('\nError: Image too dark!')
+        cam.log += '\nWARNING: Image too dark!'
+        cam.add_warning('warn', 'Image too dark', image=name)
+    else:
+        # Locate the chart on a tone-mapped copy. The raw Bayer mean is linear,
+        # so patch-to-patch contrast in the shadows/mid-tones is compressed and
+        # Canny edge detection misses the patch borders -- worst under high-CT
+        # light, where the red channel is weak. Applying the tuning template's
+        # gamma curve expands that low/mid contrast (matching the tone-mapped
+        # preview in which the chart is always found) and makes detection robust.
+        # Only the location search sees this; patch values are still read from the
+        # untouched linear channels in get_patches, so calibration is unchanged.
+        det_chan = apply_gamma(av_chan, cam)
+        result = find_macbeth(cam, det_chan, mac_config)
+
+    if result is None or result[0] is None:
+        return False
+    coords_fit, confidence = result
+    mac_cen_coords = coords_fit[1]
+
+    warning = _chart_size_warning(np.asarray(coords_fit[0][0]), av_chan.shape[1])
+    if warning:
+        cam.log += '\n' + warning
+        cam.add_warning('warn', warning, image=name)
+
+    img.get_patches(mac_cen_coords)
+    cam.log += f'\nPatch sampling window: {img.patch_size} px'
+    if img.saturated:
+        logger.error('\nERROR: Macbeth patches have saturated')
+        cam.log += '\nWARNING: Macbeth patches have saturated!'
+        cam.add_warning('warn', 'Macbeth patches saturated', image=name)
+        return False
+
+    if confidence is not None:
+        img.macbeth_confidence = confidence
+    return True
+
+
 def load_image(cam: Camera, im_str: str, mac_config: tuple | None = None, mac: bool = True) -> Image | None:
     if '.dng' in im_str:
         img = dng_load_image(cam, im_str)
 
-        if mac:
-            av_chan = np.mean(np.array(img.channels), axis=0) / (2**16)
-            av_val = np.mean(av_chan)
-            if av_val < img.blacklevel_16 / (2**16) + 1 / 64:
-                result = None
-                logger.error('\nError: Image too dark!')
-                cam.log += '\nWARNING: Image too dark!'
-                cam.add_warning('warn', 'Image too dark', image=Path(im_str).name)
-            else:
-                # Locate the chart on a tone-mapped copy. The raw Bayer mean is linear,
-                # so patch-to-patch contrast in the shadows/mid-tones is compressed and
-                # Canny edge detection misses the patch borders -- worst under high-CT
-                # light, where the red channel is weak. Applying the tuning template's
-                # gamma curve expands that low/mid contrast (matching the tone-mapped
-                # preview in which the chart is always found) and makes detection robust.
-                # Only the location search sees this; patch values are still read from the
-                # untouched linear channels in get_patches, so calibration is unchanged.
-                det_chan = apply_gamma(av_chan, cam)
-                result = find_macbeth(cam, det_chan, mac_config)
-
-            if result is None or result[0] is None:
-                return None
-            coords_fit, confidence = result
-            mac_cen_coords = coords_fit[1]
-
-            warning = _chart_size_warning(np.asarray(coords_fit[0][0]), av_chan.shape[1])
-            if warning:
-                cam.log += '\n' + warning
-                cam.add_warning('warn', warning, image=Path(im_str).name)
-
-            img.get_patches(mac_cen_coords)
-            cam.log += f'\nPatch sampling window: {img.patch_size} px'
-            if img.saturated:
-                logger.error('\nERROR: Macbeth patches have saturated')
-                cam.log += '\nWARNING: Macbeth patches have saturated!'
-                cam.add_warning('warn', 'Macbeth patches saturated', image=Path(im_str).name)
-                return None
-
-            if confidence is not None:
-                img.macbeth_confidence = confidence
+        if mac and not _detect_macbeth(cam, img, mac_config, Path(im_str).name):
+            return None
 
         return img
 
     else:
         return None
+
+
+def load_image_group(cam: Camera, im_strs: list[str], mac_config: tuple | None = None) -> Image | None:
+    """Load a burst group of Macbeth captures as one internally-averaged Image.
+
+    The frames are exposures of the same scene (same filename apart from the
+    trailing index), so their raw channels are averaged before chart detection
+    — equivalent to a longer effective exposure, cutting patch noise ~sqrt(N).
+    The returned Image also carries patches_single, sampled from the first
+    frame at the same chart coordinates, so the noise calibration can use true
+    single-frame statistics.
+    """
+    if len(im_strs) == 1:
+        return load_image(cam, im_strs[0], mac_config)
+
+    imgs = [dng_load_image(cam, im_str) for im_str in im_strs]
+    base = imgs[0]
+    single_channels = base.channels
+    base.channels = [np.mean([img.channels[i] for img in imgs], axis=0) for i in range(len(base.channels))]
+    base.frames_averaged = len(imgs)
+    cam.log += f'\nAveraged {len(imgs)} burst frames'
+
+    if not _detect_macbeth(cam, base, mac_config, base.name):
+        return None
+
+    # Patches of one un-averaged frame, sampled at the same chart coordinates
+    # and window, for the noise calibration (averaged data understates noise).
+    single = Image()
+    single.channels = single_channels
+    single.sigbits = base.sigbits
+    single.get_patches([base.cen_coords], size=base.patch_size)
+    base.patches_single = single.patches
+    return base

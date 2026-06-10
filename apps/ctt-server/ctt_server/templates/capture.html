@@ -147,6 +147,10 @@
         <label>Lux</label>
         <input type="number" x-model.number="form.lux" min="1" step="1">
       </div>
+      <div class="field" style="flex:0 0 100px; margin:0">
+        <label title="Frames captured per shot, saved as indexed files; CTT averages each burst internally">Burst</label>
+        <input type="number" x-model.number="form.frames" min="1" max="16" step="1">
+      </div>
       <div class="field" style="flex:0 0 auto; margin:0">
         <button class="btn primary" :disabled="!connected || busy" @click="capture()">
           <span x-text="busy ? 'Capturing…' : '● Capture'"></span>

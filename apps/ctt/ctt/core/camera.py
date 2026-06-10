@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ..output.json_formatter import pretty_print
 from ..utils.tools import get_photos
-from .image_loader import load_image
+from .image_loader import load_image, load_image_group
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,17 @@ class _LogBuffer:
 
     def __str__(self) -> str:
         return ''.join(self._parts)
+
+
+def burst_group_key(filename: str) -> str:
+    """Group key for Macbeth burst frames: the name with the trailing index removed.
+
+    Burst captures of the same scene share a name apart from a trailing _<n>
+    (e.g. d65_5000k_800l_2.dng groups under d65_5000k_800l.dng); CTT averages
+    each group internally. Names without an index group alone.
+    """
+    m = re.match(r'^(?P<base>.*\d[lL])_\d+(?P<ext>\.dng)$', filename, re.IGNORECASE)
+    return f'{m.group("base")}{m.group("ext")}' if m else filename
 
 
 def get_col_lux(string: str) -> tuple[int | None, int | None]:
@@ -131,6 +142,12 @@ class Camera:
         self.log += f'\nFiles found: {len(filename_list)}'
         logger.info('Loading')
         filename_list.sort()
+        # Macbeth burst frames (same name apart from a trailing _<n> index) are
+        # averaged internally; collect the groups so each is processed once.
+        mac_groups: dict[str, list[str]] = {}
+        for filename in filename_list:
+            if 'alsc' not in filename and 'cac' not in filename:
+                mac_groups.setdefault(burst_group_key(filename), []).append(filename)
         for filename in filename_list:
             address = directory + filename
             self.log += f'\n\nImage: {filename}'
@@ -168,25 +185,30 @@ class Camera:
                 continue
             else:
                 self.log += '\nIdentified as macbeth chart image'
+                group = mac_groups[burst_group_key(filename)]
+                if filename != group[0]:
+                    self.log += f'\nPart of burst group {burst_group_key(filename)} (already processed)'
+                    continue
                 if col is None or lux is None:
                     logger.info(f'\t{filename}')
                     logger.error('\t\t✗ Colour temp/lux not found in filename (expected e.g. 5000k_800l.dng)')
                     self.log += '\nWARNING: Error reading colour temp/lux from filename'
                     self.log += '\nImage discarded!'
                     continue
-                img = load_image(self, address, mac_config)
+                img = load_image_group(self, [directory + f for f in group], mac_config)
                 if img is None:
                     logger.info(f'\t{filename}')
                     logger.error('\t\t✗ Macbeth chart not found in image')
                     self.log += '\nImage discarded!'
                     continue
                 img.col, img.lux = col, lux
-                img.name = filename
+                img.name = burst_group_key(filename)
                 self.log += f'\nColour temperature: {col} K'
                 self.log += f'\nLux value: {lux} lx'
                 if blacklevel != -1:
                     img.blacklevel_16 = blacklevel
-                logger.info(f'\t{filename}')
+                label = filename if len(group) == 1 else f'{img.name} ({len(group)}-frame burst)'
+                logger.info(f'\t{label}')
                 if getattr(img, 'macbeth_confidence', None) is not None:
                     logger.info(f'\t\t✓ Macbeth found (confidence {img.macbeth_confidence:.3f})')
                 self.imgs.append(img)

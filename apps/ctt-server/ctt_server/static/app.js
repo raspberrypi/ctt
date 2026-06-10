@@ -136,7 +136,7 @@ function captureApp(cfg) {
     connected: null,                 // null = unknown until /api/health resolves
     captures: cfg.captures || [],
     counts: { macbeth: 0, alsc: 0, cac: 0 },
-    form: { image_type: 'macbeth', colour_temp: 6500, lux: 1000 },
+    form: { image_type: 'macbeth', colour_temp: 6500, lux: 1000, frames: 1 },
     controls: { exposure: 10000, gain: 1.0, auto_exposure: true, colour_temp: 0, lux: 0, ev: 0 },
     camera: { model: '', resolution: null },
     metered: { exposure: 0, gain: 0, colour_temp: 0, lux: 0, focus_fom: 0 },
@@ -254,7 +254,8 @@ function captureApp(cfg) {
       if (this.form.image_type === 'alsc') return `alsc_${ct}k_${this.nextIndex('alsc', ct)}.dng`;
       if (this.form.image_type === 'cac') return `cac_${ct}k_${this.nextIndex('cac', ct)}.dng`;
       const label = sanitiseLabel(this.project) || 'mac';
-      return `${label}_${ct}k_${this.form.lux || 0}l.dng`;
+      const suffix = (this.form.frames || 1) > 1 ? '_<n>' : '';
+      return `${label}_${ct}k_${this.form.lux || 0}l${suffix}.dng`;
     },
 
     async loadControls() {
@@ -332,10 +333,11 @@ function captureApp(cfg) {
 
     async capture() {
       this.error = '';
-      // Warn before overwriting: a re-capture at the same colour temp + lux
-      // reuses the filename and replaces the existing image on disk.
+      const frames = this.form.frames || 1;
+      // Warn before overwriting: a single re-capture at the same colour temp +
+      // lux reuses the filename. Burst frames get fresh indexed names instead.
       const name = this.previewName();
-      if (this.captures.some((c) => c.filename === name) &&
+      if (frames === 1 && this.captures.some((c) => c.filename === name) &&
           !confirm(`“${name}” already exists. Capturing again will overwrite it. Continue?`)) {
         return;
       }
@@ -347,19 +349,18 @@ function captureApp(cfg) {
             image_type: this.form.image_type,
             colour_temp: this.form.colour_temp,
             lux: this.form.image_type === 'macbeth' ? this.form.lux : null,
+            frames,
           }),
         });
         const data = await r.json();
         if (!r.ok) { this.error = data.error || 'Capture failed'; return; }
-        const entry = {
-          filename: data.filename, image_type: data.image_type,
-          colour_temp: data.colour_temp, lux: data.lux, label: data.label, valid: true,
-          jpeg: data.jpeg || 'saved',
-        };
-        // Replace the existing entry on overwrite, otherwise add to the top.
-        const idx = this.captures.findIndex((c) => c.filename === data.filename);
-        if (idx >= 0) this.captures.splice(idx, 1, entry);
-        else this.captures.unshift(entry);
+        for (const entry of (data.added || [])) {
+          entry.jpeg = entry.jpeg || 'saved';
+          // Replace the existing entry on overwrite, otherwise add to the top.
+          const idx = this.captures.findIndex((c) => c.filename === entry.filename);
+          if (idx >= 0) this.captures.splice(idx, 1, entry);
+          else this.captures.unshift(entry);
+        }
         this.updateCounts();
       } catch (e) {
         this.error = 'Capture request failed';
