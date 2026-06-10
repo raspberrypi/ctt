@@ -28,7 +28,7 @@ from flask import (
 
 from ctt.devices import LightboxError, get_shared_lightbox
 
-from . import ctt_runner, mtf, results
+from . import colour_check, ctt_runner, mtf, results
 from .camera import (
     MJPEG_CONTENT_TYPE,
     CameraError,
@@ -268,6 +268,23 @@ def create_app(workspace_root: str | None = None) -> Flask:
     @app.route('/api/macbeth')
     def api_macbeth():
         return jsonify(camera_or_503().detect_chart())
+
+    @app.route('/api/macbeth-deltae')
+    def api_macbeth_deltae():
+        """Measure the colour accuracy actually achieved by the loaded tuning.
+
+        Locates the Macbeth chart in a live ISP-processed frame and reports the
+        delta E of each patch against the reference colours — comparable with
+        the calibration-time CCM metrics, but measured through the real pipeline.
+        """
+        info = camera_or_503().chart_patches()
+        if not info.get('found'):
+            return jsonify({'found': False})
+        # Picamera2 'RGB888' arrays are BGR-ordered; the colour maths wants RGB.
+        rgb_frame = info['frame'][..., ::-1]
+        means = colour_check.patch_means(rgb_frame, info['centres'])
+        report = colour_check.deltae_report(means)
+        return jsonify({'found': True, 'confidence': info['confidence'], **report})
 
     # --- live preview test (load a generated tuning into the camera) -------
     @app.route('/projects/<name>/preview-test', methods=['POST'])

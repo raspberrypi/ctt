@@ -612,6 +612,10 @@ function resultsApp(cfg) {
     metered: { exposure: 0, gain: 0, colour_temp: 0, lux: 0 },  // live metered values
     controls: { auto_exposure: true, exposure: 0, gain: 1, ev: 0 },  // exposure panel state
     lightbox: { present: false, channel: null, intensity: 0, illuminants: {} },  // optional lightbox device
+    colour: null,         // current live ΔE reading (for whichever tuning is loaded)
+    liveColour: true,     // semi-live colour measurement while previewing
+    chartSeen: null,      // null = no reading yet, false = chart not found, {confidence} = found
+    _colourPolling: false,  // guards a single colour-poll loop
     _polling: false,      // guards a single metered-poll loop
 
     init() {
@@ -683,7 +687,7 @@ function resultsApp(cfg) {
         // Cache-bust so the <img> opens a fresh MJPEG stream on the new camera.
         this.previewSrc = '/api/preview?t=' + Date.now();
         if (this.hflip || this.vflip) await this._postTransform();  // re-apply flip on the fresh camera
-        this._loadCamInfo(); this.pollMetered();
+        this._loadCamInfo(); this.pollMetered(); this.pollColour();
       } catch (e) {
         this.testError = 'Preview request failed';
       } finally {
@@ -791,12 +795,70 @@ function resultsApp(cfg) {
         this.testing = true;
         this.previewSrc = '/api/preview?t=' + Date.now();
         if (this.hflip || this.vflip) await this._postTransform();  // re-apply flip on the fresh camera
-        this._loadCamInfo(); this.pollMetered();
+        this._loadCamInfo(); this.pollMetered(); this.pollColour();
       } catch (e) {
         this.testError = 'Preview request failed';
       } finally {
         this.busy = false;
       }
+    },
+
+    // Semi-live colour accuracy: while the preview test runs, periodically
+    // locate the Macbeth chart in a processed frame and ΔE its patches —
+    // the current reading for whichever tuning is loaded.
+    pollColour() {
+      if (this._colourPolling) return;
+      this._colourPolling = true;
+      const tick = async () => {
+        if (!this.testing || !this.liveColour) { this._colourPolling = false; return; }
+        if (!document.hidden) {
+          try {
+            const r = await fetch('/api/macbeth-deltae');
+            const d = await r.json().catch(() => ({}));
+            if (r.ok && d.found) {
+              this.chartSeen = { confidence: d.confidence };
+              this.colour = d;
+              this.$nextTick(() => requestAnimationFrame(() => { try { this.renderLiveDe(); } catch (e) { console.error(e); } }));
+            } else {
+              this.chartSeen = false;
+            }
+          } catch (e) { /* transient */ }
+        }
+        if (this.testing && this.liveColour) setTimeout(tick, 2000); else this._colourPolling = false;
+      };
+      tick();
+    },
+
+    renderLiveDe() {
+      const ctx = document.getElementById('liveDeChart');
+      const d = this.colour;
+      if (!ctx || !d) return;
+      const label = `ΔE · ${this.testKind === 'standard' ? 'existing' : 'tuned'}`;
+      const chart = this._charts.livede;
+      if (chart) {
+        // Update in place: a destroy/recreate every poll would flicker.
+        chart.data.datasets[0].label = label;
+        chart.data.datasets[0].data = d.patches.map((p) => p.de);
+        chart.data.datasets[0].backgroundColor = d.patches.map((p) => `rgb(${p.rgb[0]},${p.rgb[1]},${p.rgb[2]})`);
+        chart.update('none');
+        return;
+      }
+      const opts = chartOpts('Macbeth patch', 'ΔE (CIE2000)');
+      opts.plugins.legend.display = false;
+      opts.plugins.tooltip = { callbacks: { title: (i) => 'Patch ' + (i[0].dataIndex + 1) } };
+      this._charts.livede = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: d.patches.map((_, i) => i + 1),
+          datasets: [{
+            label,
+            data: d.patches.map((p) => p.de),
+            backgroundColor: d.patches.map((p) => `rgb(${p.rgb[0]},${p.rgb[1]},${p.rgb[2]})`),
+            borderColor: 'rgba(255,255,255,0.25)', borderWidth: 1,
+          }],
+        },
+        options: opts,
+      });
     },
 
     async capturePng() {

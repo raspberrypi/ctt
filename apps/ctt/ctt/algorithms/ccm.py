@@ -42,6 +42,34 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MATRIX_SELECTION_TYPES = ('average', 'maximum', 'patches')
 _DEFAULT_TEST_PATCHES = [1, 2, 5, 8, 9, 12, 14]
 
+# Standard Macbeth chart reference colours (sRGB 0-255, canonical chart order).
+MACBETH_RGB = [
+    [116, 81, 67],  # dark skin
+    [199, 147, 129],  # light skin
+    [91, 122, 156],  # blue sky
+    [90, 108, 64],  # foliage
+    [130, 128, 176],  # blue flower
+    [92, 190, 172],  # bluish green
+    [224, 124, 47],  # orange
+    [68, 91, 170],  # purplish blue
+    [198, 82, 97],  # moderate red
+    [94, 58, 106],  # purple
+    [159, 189, 63],  # yellow green
+    [230, 162, 39],  # orange yellow
+    [35, 63, 147],  # blue
+    [67, 149, 74],  # green
+    [180, 49, 57],  # red
+    [238, 198, 20],  # yellow
+    [193, 84, 151],  # magenta
+    [0, 136, 170],  # cyan (goes out of gamut)
+    [245, 245, 243],  # white 9.5
+    [200, 202, 202],  # neutral 8
+    [161, 163, 163],  # neutral 6.5
+    [121, 121, 122],  # neutral 5
+    [82, 84, 86],  # neutral 3.5
+    [49, 49, 51],  # black 2
+]
+
 
 class CcmCalibration(CalibrationAlgorithm):
     json_key = 'rpi.ccm'
@@ -139,35 +167,7 @@ def ccm(
     calibration's colour accuracy against the shipped default.
     """
     imgs = cam.imgs
-    # Standard macbeth chart colour values.
-    m_rgb = np.array(
-        [  # these are in RGB
-            [116, 81, 67],  # dark skin
-            [199, 147, 129],  # light skin
-            [91, 122, 156],  # blue sky
-            [90, 108, 64],  # foliage
-            [130, 128, 176],  # blue flower
-            [92, 190, 172],  # bluish green
-            [224, 124, 47],  # orange
-            [68, 91, 170],  # purplish blue
-            [198, 82, 97],  # moderate red
-            [94, 58, 106],  # purple
-            [159, 189, 63],  # yellow green
-            [230, 162, 39],  # orange yellow
-            [35, 63, 147],  # blue
-            [67, 149, 74],  # green
-            [180, 49, 57],  # red
-            [238, 198, 20],  # yellow
-            [193, 84, 151],  # magenta
-            [0, 136, 170],  # cyan (goes out of gamut)
-            [245, 245, 243],  # white 9.5
-            [200, 202, 202],  # neutral 8
-            [161, 163, 163],  # neutral 6.5
-            [121, 121, 122],  # neutral 5
-            [82, 84, 86],  # neutral 3.5
-            [49, 49, 51],  # black 2
-        ]
-    )
+    m_rgb = np.array(MACBETH_RGB)
     # Convert reference colours from sRGB to linear RGB (now in 16-bit scale).
     m_srgb = degamma(m_rgb)
     # Produce array of LAB values for ideal color chart.
