@@ -2,6 +2,7 @@
 <div class="proj-head"><h1>{{ project.name }}</h1></div>
 <nav class="tabs">
   <a href="{{ url_for('project', name=project.name) }}" class="{{ 'active' if active_tab == 'capture' }}">Capture</a>
+  <a href="{{ url_for('images_page', name=project.name) }}" class="{{ 'active' if active_tab == 'images' }}">Images</a>
   <a href="{{ url_for('run_page', name=project.name) }}" class="{{ 'active' if active_tab == 'run' }}">Run CTT</a>
   <a href="{{ url_for('results_page', name=project.name) }}" class="{{ 'active' if active_tab == 'results' }}">Results</a>
   <a href="{{ url_for('tuning_page', name=project.name) }}" class="{{ 'active' if active_tab == 'tuning' }}">Tuning</a>
