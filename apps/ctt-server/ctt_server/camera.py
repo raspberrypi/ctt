@@ -131,6 +131,7 @@ class Picamera2Camera:
             'gain': round(float(md.get('AnalogueGain', 0.0)), 3),
             'colour_temp': int(md.get('ColourTemperature', 0)),
             'lux': round(float(md.get('Lux', 0.0)), 1),
+            'focus_fom': int(md.get('FocusFoM', 0)),  # focus figure of merit (higher = sharper)
             'ev': round(self._ev, 2),
             'auto_exposure': self._auto,
         }
