@@ -196,3 +196,63 @@ class TestAddImgsImageFilter:
         cam = self._camera_with_dir(tmp_path, monkeypatch)
         cam.add_imgs(str(tmp_path) + '/', (0, 0), images=[])
         assert cam.imgs_alsc == []
+
+
+# --- adaptive Macbeth patch sampling window ---
+
+
+class TestAdaptivePatchWindow:
+    def _image_with_grid(self, spacing, jitter=0):
+        # 6x4 grid of patch centres with the given pitch, on uniform channels.
+        img = Image()
+        img.sigbits = 12
+        centres = [[c * spacing + spacing, r * spacing + spacing] for r in range(4) for c in range(6)]
+        h = spacing * 6 + 2 * spacing
+        w = spacing * 7 + 2 * spacing
+        img.channels = [np.full((h, w), 1000.0) for _ in range(4)]
+        img.get_patches([centres])
+        return img
+
+    def test_window_scales_with_chart(self):
+        # Pitch 100 -> ~35 px window (0.35 * pitch, rounded down to even).
+        img = self._image_with_grid(100)
+        assert img.patch_size == 34
+        assert len(img.patches[0][0]) == 34 * 34
+
+    def test_window_clamped_large(self):
+        assert self._image_with_grid(300).patch_size == 64
+
+    def test_window_clamped_small(self):
+        assert self._image_with_grid(20).patch_size == 8
+
+    def test_explicit_size_still_honoured(self):
+        img = Image()
+        img.sigbits = 12
+        img.channels = [np.full((200, 200), 1000.0) for _ in range(4)]
+        img.get_patches([[[100, 100]] * 24], size=16)
+        assert img.patch_size == 16
+
+
+# --- chart size warnings ---
+
+
+class TestChartSizeWarning:
+    def _corners(self, x0, x1):
+        return np.array([[x0, 10], [x1, 10], [x1, 80], [x0, 80]], dtype=float)
+
+    def test_good_size_no_warning(self):
+        from ctt.core.image_loader import _chart_size_warning
+
+        assert _chart_size_warning(self._corners(300, 800), 1000) is None  # 50%
+
+    def test_small_chart_warns(self):
+        from ctt.core.image_loader import _chart_size_warning
+
+        msg = _chart_size_warning(self._corners(400, 600), 1000)  # 20%
+        assert msg and 'small' in msg and 'closer' in msg
+
+    def test_full_frame_chart_warns(self):
+        from ctt.core.image_loader import _chart_size_warning
+
+        msg = _chart_size_warning(self._corners(20, 980), 1000)  # 96%
+        assert msg and 'fills the frame' in msg

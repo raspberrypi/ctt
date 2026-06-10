@@ -33,11 +33,22 @@ class Image:
     rgb: np.ndarray | None = None
     cen_coords: list | None = None
     macbeth_confidence: float | None = None
+    patch_size: int | None = None
     ver: int = 0
 
-    def get_patches(self, cen_coords: list, size: int = 16) -> int:
+    def get_patches(self, cen_coords: list, size: int | None = None) -> int:
         cen_coords = list(np.array(cen_coords[0]).astype(np.int32))
         self.cen_coords = cen_coords
+        if size is None:
+            # Scale the sampling window with the chart: ~1/3 of the patch pitch
+            # stays well inside a patch while averaging as many pixels as the
+            # framing allows (the old fixed 16 px wasted SNR on large charts).
+            pts = np.array(cen_coords, dtype=np.float64)
+            dists = np.linalg.norm(pts[:, None] - pts[None], axis=-1)
+            np.fill_diagonal(dists, np.inf)
+            spacing = float(np.median(dists.min(axis=1)))
+            size = int(np.clip(spacing * 0.35, 8, 64)) & ~1  # even, clamped
+        self.patch_size = size
         half = size // 2
         all_patches = []
         for ch in self.channels:

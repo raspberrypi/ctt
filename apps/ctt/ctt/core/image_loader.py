@@ -117,6 +117,23 @@ def apply_gamma(av_chan: np.ndarray, cam: Camera) -> np.ndarray:
     return np.interp(np.clip(av_chan, 0, 1) * 65535.0, xs, ys) / 65535.0
 
 
+def _chart_size_warning(corners: np.ndarray, image_width: float) -> str | None:
+    """Advise when the detected chart is a poor size in the frame.
+
+    Too small wastes SNR (tiny patch windows); near-full-frame puts the
+    outer patches into the lens-shading corners.
+    """
+    xs = np.asarray(corners, dtype=np.float64)[:, 0]
+    fraction = (xs.max() - xs.min()) / image_width
+    if fraction < 0.25:
+        return f'Macbeth chart small in frame ({fraction:.0%} of width) — move closer for better patch statistics'
+    if fraction > 0.9:
+        return (
+            f'Macbeth chart fills the frame ({fraction:.0%} of width) — outer patches sit in the lens-shading corners'
+        )
+    return None
+
+
 def load_image(cam: Camera, im_str: str, mac_config: tuple | None = None, mac: bool = True) -> Image | None:
     if '.dng' in im_str:
         img = dng_load_image(cam, im_str)
@@ -146,7 +163,13 @@ def load_image(cam: Camera, im_str: str, mac_config: tuple | None = None, mac: b
             coords_fit, confidence = result
             mac_cen_coords = coords_fit[1]
 
+            warning = _chart_size_warning(np.asarray(coords_fit[0][0]), av_chan.shape[1])
+            if warning:
+                cam.log += '\n' + warning
+                cam.add_warning('warn', warning, image=Path(im_str).name)
+
             img.get_patches(mac_cen_coords)
+            cam.log += f'\nPatch sampling window: {img.patch_size} px'
             if img.saturated:
                 logger.error('\nERROR: Macbeth patches have saturated')
                 cam.log += '\nWARNING: Macbeth patches have saturated!'
