@@ -6,7 +6,8 @@
 
 <div x-data='imagesApp({
         project: {{ project.name|tojson }},
-        captures: {{ captures|tojson }}
+        captures: {{ captures|tojson }},
+        rawpy: {{ rawpy_available|tojson }}
      })'>
 
   <div class="card">
@@ -24,12 +25,17 @@
     <div class="img-grid mt" x-show="captures.length">
       <template x-for="c in captures" :key="c.filename">
         <div class="img-card" :class="{ invalid: !c.valid }">
-          <div class="thumb" :class="{ clickable: c.jpeg }" @click="c.jpeg && openViewer(c)">
+          <div class="thumb" :class="{ clickable: c.jpeg }" @click="c.jpeg && openViewer(c, bestSource(c))">
             <template x-if="c.jpeg">
               <img loading="lazy" draggable="false" :src="thumbSrc(c)" :alt="c.filename">
             </template>
             <div class="thumb-empty" x-show="!c.jpeg">no preview</div>
-            <button class="btn sm danger x" @click.stop="remove(c.filename)" title="Delete image">✕</button>
+            <div class="card-menu">
+              <button x-show="c.jpeg === 'saved'" @click.stop="openViewer(c, 'jpeg')">Preview (JPEG)</button>
+              <button x-show="rawpy" @click.stop="openViewer(c, 'raw')">Preview (raw)</button>
+              <button @click.stop="openExif(c)">EXIF</button>
+              <button class="danger" @click.stop="remove(c.filename)">Delete</button>
+            </div>
           </div>
           <div class="info">
             <div class="fname" x-text="c.filename"></div>
@@ -58,7 +64,8 @@
       <div class="preview-wrap" :class="{ louping: loupe.active }" @dragstart.prevent
            @pointerdown="loupeStart($event)" @pointermove="loupeMove($event)"
            @pointerup="loupeEnd($event)" @pointerleave="loupeEnd($event)" @pointercancel="loupeEnd($event)">
-        <img id="imgsViewerImg" draggable="false" :src="viewer.src" alt="captured image">
+        <img id="imgsViewerImg" draggable="false" :src="viewer.src" alt="captured image" @load="viewer.loading = false">
+        <div class="placeholder" x-show="viewer.loading" x-cloak>Developing DNG…</div>
         <div id="imgsViewerMarker" class="loupe-marker" x-show="loupe.active" x-cloak></div>
         <canvas id="imgsViewerLoupe" class="loupe" width="220" height="220" x-show="loupe.active" x-cloak></canvas>
       </div>
@@ -66,6 +73,37 @@
         <span x-text="viewer.filename"></span>
         <span class="muted" x-show="viewer.developed"> · developed from DNG (rawpy preview)</span>
       </div>
+    </div>
+  </div>
+
+  <!-- EXIF metadata modal -->
+  <div class="viewer-backdrop" x-show="exif.open" x-cloak
+       @click.self="exif.open = false" @keydown.escape.window="exif.open = false">
+    <div class="exif-box card">
+      <div class="card-head">
+        <h2 x-text="exif.filename"></h2>
+        <button class="btn sm ghost" @click="exif.open = false">✕</button>
+      </div>
+      <div class="muted" x-show="exif.loading">Reading metadata…</div>
+      <div class="banner error" x-show="exif.error" x-text="exif.error" x-cloak></div>
+      <div class="muted" x-show="!exif.loading && !exif.error && !exif.summary.length">No metadata found.</div>
+      <table class="exif-table" x-show="exif.summary.length">
+        <tbody>
+          <template x-for="row in exif.summary" :key="row.label">
+            <tr><th x-text="row.label"></th><td class="mono" x-text="row.value"></td></tr>
+          </template>
+        </tbody>
+      </table>
+      <details class="mt" x-show="exif.tags.length">
+        <summary class="muted">All tags (<span x-text="exif.tags.length"></span>)</summary>
+        <table class="exif-table mt">
+          <tbody>
+            <template x-for="t in exif.tags" :key="t.key">
+              <tr><th x-text="t.key"></th><td class="mono" x-text="t.value"></td></tr>
+            </template>
+          </tbody>
+        </table>
+      </details>
     </div>
   </div>
 </div>

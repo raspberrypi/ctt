@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+import exifread
 from flask import (
     Flask,
     Response,
@@ -85,6 +86,51 @@ def _serialise_captures(project: Project) -> list[dict]:
             }
         )
     return out
+
+
+def _dng_exif(path: Path) -> dict:
+    """Read a DNG's EXIF metadata: a curated summary plus the full tag dump.
+
+    Raspberry Pi DNGs vary by writer (rpicam/libcamera vs PiDNG), so each
+    summary tag is looked up across the three IFD prefixes they use — the same
+    tolerance as the core's dng_load_image. Tags a writer omits are skipped.
+    """
+    with open(path, 'rb') as f:
+        tags = exifread.process_file(f, details=False)
+
+    def tag(name):
+        for prefix in ('EXIF SubIFD0', 'Image', 'EXIF'):
+            value = tags.get(f'{prefix} {name}')
+            if value is not None:
+                return value
+        raise KeyError(name)
+
+    def exposure_ms(t):
+        r = t.values[0]
+        return f'{r.num / r.den * 1000:.2f} ms'
+
+    rows = [
+        ('Camera model', 'Model', str),
+        ('Make', 'Make', str),
+        ('Software', 'Software', str),
+        ('Captured', 'DateTime', str),
+        ('Width', 'ImageWidth', lambda t: str(t.values[0])),
+        ('Height', 'ImageLength', lambda t: str(t.values[0])),
+        ('Exposure time', 'ExposureTime', exposure_ms),
+        ('ISO', 'ISOSpeedRatings', lambda t: str(t.values[0])),
+        ('Black level', 'BlackLevel', str),
+        ('White level', 'Tag 0xC61D', lambda t: str(t.values[0])),  # exifread's name for DNG WhiteLevel
+        ('CFA pattern', 'CFAPattern', str),
+    ]
+    summary = []
+    for label, name, fmt in rows:
+        try:
+            summary.append({'label': label, 'value': fmt(tag(name))})
+        except Exception:  # noqa: S112 - tag missing or unexpected shape: skip the row
+            continue
+    # Full dump for the expandable "all tags" view; thumbnails are raw bytes, skip them.
+    all_tags = [{'key': k, 'value': str(v)} for k, v in sorted(tags.items()) if not isinstance(v, bytes)]
+    return {'summary': summary, 'tags': all_tags}
 
 
 def create_app(workspace_root: str | None = None) -> Flask:
@@ -186,7 +232,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
     @app.route('/projects/<name>/images')
     def images_page(name: str):
         proj = get_project_or_404(name)
-        return render_template('images.html', project=proj, captures=_serialise_captures(proj))
+        return render_template('images.html', project=proj, captures=_serialise_captures(proj), rawpy_available=_RAWPY)
 
     # --- camera API --------------------------------------------------------
     @app.route('/api/health')
@@ -359,24 +405,12 @@ def create_app(workspace_root: str | None = None) -> Flask:
         proj.delete_capture(filename)
         return jsonify({'ok': True, 'counts': proj.counts()})
 
-    @app.route('/projects/<name>/captures/<filename>/jpeg')
-    def capture_jpeg(name: str, filename: str):
-        """Serve a capture's preview JPEG: the saved sibling if present, else a
-        rawpy-developed preview of the DNG (won't match the ISP look).
+    def _develop_dng(dng: Path, thumb: bool = False) -> Response:
+        """Develop a DNG into a preview JPEG with rawpy (won't match the ISP look).
 
-        ?thumb=1 develops the DNG at half size with a lower JPEG quality — the
+        thumb=True develops at half size with a lower JPEG quality — the
         Images-tab grid would otherwise trigger a full-resolution develop per
         thumbnail, which is far too slow on a Pi."""
-        proj = get_project_or_404(name)
-        thumb = request.args.get('thumb') == '1'
-        if not filename.endswith('.dng'):  # <filename> can't contain '/', so no traversal
-            abort(404)
-        jpg = (proj.path / filename).with_suffix('.jpg')
-        if jpg.exists():
-            return send_file(jpg, mimetype='image/jpeg')
-        dng = proj.path / filename
-        if not (_RAWPY and dng.exists()):
-            abort(404)
         import cv2  # noqa: PLC0415
 
         try:
@@ -385,11 +419,45 @@ def create_app(workspace_root: str | None = None) -> Flask:
             quality = 70 if thumb else 90
             ok, buf = cv2.imencode('.jpg', cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, quality])
         except Exception:
-            logger.exception('Failed to develop DNG preview for %s', filename)
+            logger.exception('Failed to develop DNG preview for %s', dng.name)
             abort(500)
         if not ok:
             abort(500)
         return Response(buf.tobytes(), mimetype='image/jpeg')
+
+    @app.route('/projects/<name>/captures/<filename>/jpeg')
+    def capture_jpeg(name: str, filename: str):
+        """Serve a capture's preview JPEG.
+
+        ?source=jpeg serves only the saved sibling JPEG (404 if none);
+        ?source=raw develops the DNG with rawpy (404 without rawpy);
+        ?source=auto (default) prefers the saved JPEG, falling back to rawpy."""
+        proj = get_project_or_404(name)
+        source = request.args.get('source', 'auto')
+        thumb = request.args.get('thumb') == '1'
+        if not filename.endswith('.dng'):  # <filename> can't contain '/', so no traversal
+            abort(404)
+        jpg = (proj.path / filename).with_suffix('.jpg')
+        if source != 'raw' and jpg.exists():
+            return send_file(jpg, mimetype='image/jpeg')
+        if source == 'jpeg':
+            abort(404)
+        dng = proj.path / filename
+        if not (_RAWPY and dng.exists()):
+            abort(404)
+        return _develop_dng(dng, thumb=thumb)
+
+    @app.route('/projects/<name>/captures/<filename>/exif')
+    def capture_exif(name: str, filename: str):
+        proj = get_project_or_404(name)
+        dng = proj.path / filename
+        if not filename.endswith('.dng') or not dng.exists():
+            abort(404)
+        try:
+            return jsonify({'filename': filename, **_dng_exif(dng)})
+        except Exception:
+            logger.exception('Failed to read EXIF for %s', filename)
+            abort(500)
 
     # --- run ---------------------------------------------------------------
     @app.route('/projects/<name>/run')
