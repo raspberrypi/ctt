@@ -23,32 +23,69 @@
     <div class="banner error mt" x-show="uploadMsg" x-text="uploadMsg" x-cloak></div>
 
     <div class="img-grid mt" x-show="captures.length">
-      <template x-for="c in captures" :key="c.filename">
-        <div class="img-card" :class="{ invalid: !c.valid, excluded: c.excluded }">
-          <div class="thumb" :class="{ clickable: c.jpeg }" @click="c.jpeg && openViewer(c, bestSource(c))">
-            <template x-if="c.jpeg">
-              <img loading="lazy" draggable="false" :src="thumbSrc(c)" :alt="c.filename">
-            </template>
-            <div class="thumb-empty" x-show="!c.jpeg">no preview</div>
-            <div class="card-menu">
-              <button x-show="c.jpeg === 'saved'" @click.stop="openViewer(c, 'jpeg')">Preview (JPEG)</button>
-              <button x-show="rawpy" @click.stop="openViewer(c, 'raw')">Preview (raw)</button>
-              <button @click.stop="openExif(c)">EXIF</button>
-              <button @click.stop="toggleExclude(c)" x-text="c.excluded ? 'Include in run' : 'Exclude from run'"></button>
-              <button class="danger" @click.stop="remove(c.filename)">Delete</button>
+      <template x-for="item in renderItems()" :key="item.kind + ':' + item.key">
+        <div style="display: contents">
+
+          <!-- collapsed burst group: one card, click to expand -->
+          <template x-if="item.kind === 'group'">
+            <div class="img-card group-card" @click="toggleGroup(item.key)" title="Click to expand the burst">
+              <div class="thumb clickable">
+                <template x-if="item.items[0].jpeg">
+                  <img loading="lazy" draggable="false" :src="thumbSrc(item.items[0])" :alt="item.key">
+                </template>
+                <div class="thumb-empty" x-show="!item.items[0].jpeg">no preview</div>
+                <span class="chip group-count" x-text="item.items.length + ' frames'"></span>
+              </div>
+              <div class="info">
+                <div class="fname" x-text="item.key"></div>
+                <div class="meta">
+                  <span class="chip" :class="item.items[0].image_type" x-text="item.items[0].image_type"></span>
+                  <span class="chip" x-text="item.items[0].colour_temp + 'K'"></span>
+                  <template x-if="item.items[0].lux"><span class="chip" x-text="item.items[0].lux + ' lx'"></span></template>
+                  <span class="chip jpeg">burst</span>
+                </div>
+              </div>
             </div>
-          </div>
-          <div class="info">
-            <div class="fname" x-text="c.filename"></div>
-            <div class="meta">
-              <span class="chip" :class="c.image_type" x-text="c.image_type"></span>
-              <span class="chip" x-text="c.colour_temp + 'K'"></span>
-              <template x-if="c.lux"><span class="chip" x-text="c.lux + ' lx'"></span></template>
-              <template x-if="c.jpeg === 'saved'"><span class="chip jpeg">JPEG</span></template>
-              <template x-if="!c.valid"><span class="chip bad">invalid name</span></template>
-              <template x-if="c.excluded"><span class="chip warn">excluded</span></template>
+          </template>
+
+          <!-- expanded burst group: full-width header bar, members follow as normal cards -->
+          <template x-if="item.kind === 'bar'">
+            <div class="group-bar" @click="toggleGroup(item.key)" title="Click to collapse the burst">
+              <span class="tri">▾</span> <span class="fname" x-text="item.key"></span>
+              <span class="muted" x-text="'· ' + item.count + ' frames'"></span>
             </div>
-          </div>
+          </template>
+
+          <!-- individual capture (also each member of an expanded burst) -->
+          <template x-if="item.kind === 'card'">
+            <div class="img-card" :class="{ invalid: !item.c.valid, excluded: item.c.excluded, grouped: item.grouped }">
+              <div class="thumb" :class="{ clickable: item.c.jpeg }" @click="item.c.jpeg && openViewer(item.c, bestSource(item.c))">
+                <template x-if="item.c.jpeg">
+                  <img loading="lazy" draggable="false" :src="thumbSrc(item.c)" :alt="item.c.filename">
+                </template>
+                <div class="thumb-empty" x-show="!item.c.jpeg">no preview</div>
+                <div class="card-menu">
+                  <button x-show="item.c.jpeg === 'saved'" @click.stop="openViewer(item.c, 'jpeg')">Preview (JPEG)</button>
+                  <button x-show="rawpy" @click.stop="openViewer(item.c, 'raw')">Preview (raw)</button>
+                  <button @click.stop="openExif(item.c)">EXIF</button>
+                  <button @click.stop="toggleExclude(item.c)" x-text="item.c.excluded ? 'Include in run' : 'Exclude from run'"></button>
+                  <button class="danger" @click.stop="remove(item.c.filename)">Delete</button>
+                </div>
+              </div>
+              <div class="info">
+                <div class="fname" x-text="item.c.filename"></div>
+                <div class="meta">
+                  <span class="chip" :class="item.c.image_type" x-text="item.c.image_type"></span>
+                  <span class="chip" x-text="item.c.colour_temp + 'K'"></span>
+                  <template x-if="item.c.lux"><span class="chip" x-text="item.c.lux + ' lx'"></span></template>
+                  <template x-if="item.c.jpeg === 'saved'"><span class="chip jpeg">JPEG</span></template>
+                  <template x-if="!item.c.valid"><span class="chip bad">invalid name</span></template>
+                  <template x-if="item.c.excluded"><span class="chip warn">excluded</span></template>
+                </div>
+              </div>
+            </div>
+          </template>
+
         </div>
       </template>
     </div>

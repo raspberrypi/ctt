@@ -213,6 +213,21 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .img-card .fname { font-family: var(--mono); font-size: 0.78rem; color: var(--text); word-break: break-all; margin-bottom: 8px; }
 .img-card .meta { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip.bad { color: #ffc9c9; border-color: rgba(229,72,77,0.4); background: rgba(229,72,77,0.1); }
+
+/* Burst groups: collapsed card with a frame-count chip, click to expand into
+   a full-width header bar followed by the member cards. */
+.img-card.group-card { cursor: pointer; }
+.img-card.group-card:hover { border-color: var(--border-2); }
+.img-card .group-count { position: absolute; bottom: 8px; right: 8px; background: rgba(14,17,23,0.85); }
+.group-bar {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; margin-top: 4px; cursor: pointer;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.group-bar:hover { border-color: var(--border-2); }
+.group-bar .fname { font-family: var(--mono); font-size: 0.8rem; }
+.group-bar .tri { color: var(--text-dim); }
+.img-card.grouped { border-color: var(--border-2); }
 .chip.warn { color: #ffe8b3; border-color: rgba(241,162,4,0.4); background: rgba(241,162,4,0.1); }
 
 /* Excluded-from-run captures: dimmed and desaturated; hover restores so the menu is readable. */

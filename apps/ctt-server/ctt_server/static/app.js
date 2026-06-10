@@ -398,6 +398,7 @@ function imagesApp(cfg) {
     uploadMsg: '',
     viewer: { open: false, src: '', filename: '', developed: false, loading: false },
     exif: { open: false, filename: '', loading: false, error: '', summary: [], tags: [] },
+    expandedGroups: {},  // burst group key -> true while expanded
 
     // Grid thumbnails: half-size develop for DNG-only captures (full-res is too
     // slow on a Pi); saved JPEGs are served as-is and scaled by the browser.
@@ -408,6 +409,49 @@ function imagesApp(cfg) {
     // Default preview source for a thumbnail click: the saved JPEG if there is
     // one, else a rawpy develop of the DNG.
     bestSource(c) { return c.jpeg === 'saved' ? 'jpeg' : 'raw'; },
+
+    // Burst frames share a name apart from the trailing index: Macbeth
+    // d65_5000k_800l_<n>.dng, and ALSC replicates alsc_<K>k_<n>.dng (which
+    // CTT averages per colour temperature). Group them in the grid.
+    groupKey(c) {
+      const mac = c.filename.match(/^(.*\dl)_\d+\.dng$/i);
+      if (mac) return mac[1];
+      const alsc = c.filename.match(/^(alsc_\d+k)_\d+\.dng$/i);
+      if (alsc) return alsc[1];
+      return null;
+    },
+
+    // The grid's render list: singles as cards; bursts as one collapsed card,
+    // or (expanded) a full-width header bar followed by the member cards.
+    renderItems() {
+      const groups = new Map();
+      const order = [];
+      for (const c of this.captures) {
+        const key = this.groupKey(c);
+        if (!key) { order.push({ kind: 'card', key: c.filename, c }); continue; }
+        if (!groups.has(key)) {
+          const g = { kind: 'group', key, items: [] };
+          groups.set(key, g);
+          order.push(g);
+        }
+        groups.get(key).items.push(c);
+      }
+      const out = [];
+      for (const it of order) {
+        if (it.kind === 'card') { out.push(it); continue; }
+        if (it.items.length === 1) {  // a lone _<n> file: just a normal card
+          out.push({ kind: 'card', key: it.items[0].filename, c: it.items[0] });
+        } else if (this.expandedGroups[it.key]) {
+          out.push({ kind: 'bar', key: it.key, count: it.items.length });
+          for (const c of it.items) out.push({ kind: 'card', key: c.filename, c, grouped: true });
+        } else {
+          out.push(it);
+        }
+      }
+      return out;
+    },
+
+    toggleGroup(key) { this.expandedGroups[key] = !this.expandedGroups[key]; },
 
     async uploadFiles(e) {
       const files = Array.from(e.target.files || []);
