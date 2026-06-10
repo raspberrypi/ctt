@@ -7,4 +7,5 @@
   <a href="{{ url_for('results_page', name=project.name) }}" class="{{ 'active' if active_tab == 'results' }}">Results</a>
   <a href="{{ url_for('tuning_page', name=project.name) }}" class="{{ 'active' if active_tab == 'tuning' }}">Tuning</a>
   <a href="{{ url_for('preview_page', name=project.name) }}" class="{{ 'active' if active_tab == 'preview' }}">Preview</a>
+  <a href="{{ url_for('mtf_page', name=project.name) }}" class="{{ 'active' if active_tab == 'mtf' }}">MTF</a>
 </nav>

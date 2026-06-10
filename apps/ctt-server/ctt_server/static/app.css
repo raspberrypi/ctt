@@ -238,6 +238,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .card-menu button.danger { color: var(--err); border-color: rgba(229,72,77,0.4); }
 .card-menu button.danger:hover { background: rgba(229,72,77,0.16); }
 
+/* MTF slanted-edge card: captured chart with a clickable ROI overlay. */
+.mtf-wrap { position: relative; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border); }
+.mtf-wrap img { width: 100%; height: auto; display: block; -webkit-user-drag: none; user-drag: none; }
+.mtf-wrap canvas { position: absolute; inset: 0; cursor: crosshair; touch-action: none; }
+
 /* EXIF modal */
 .exif-box { width: min(640px, 92vw); max-height: 82vh; overflow-y: auto; }
 .exif-table th { width: 40%; font-weight: 600; color: var(--text-dim); text-transform: none; letter-spacing: 0; font-size: 0.82rem; }
