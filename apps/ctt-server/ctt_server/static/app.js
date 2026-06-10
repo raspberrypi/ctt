@@ -1030,6 +1030,270 @@ function resultsApp(cfg) {
   };
 }
 
+// --- MTF (slanted edge) card on the Results page ----------------------------
+function mtfApp(cfg) {
+  return {
+    project: cfg.project,
+    busy: false,
+    measuring: false,
+    hasCapture: false,
+    connected: null,   // null until /api/health resolves
+    live: false,       // true = live viewfinder, false = captured results view
+    liveTick: 0,       // cache-bust so the MJPEG <img> reopens on re-entry
+    camera: { model: '', resolution: null },
+    metered: { exposure: 0, gain: 0, colour_temp: 0, lux: 0, focus_fom: 0 },
+    hflip: false,
+    vflip: false,
+    previewSrc: '',
+    rois: [],          // sensor-pixel coords {x, y, w, h}
+    results: null,
+    error: '',
+    _nat: { w: 0, h: 0 },  // captured image natural (sensor) size
+    _chart: null,
+
+    async init() {
+      // A chart captured in an earlier session is reusable; probe for it.
+      this.previewSrc = `/projects/${this.project}/mtf/preview?t=${Date.now()}`;
+      const f = loadFlip();  // restore the flip choice (persists across tabs)
+      this.hflip = !!f.hflip; this.vflip = !!f.vflip;
+      try {
+        const r = await fetch('/api/health');
+        const h = await r.json();
+        this.connected = r.ok && h.camera === true;
+        if (h.model) this.camera.model = h.model;
+        if (h.resolution) this.camera.resolution = h.resolution;
+      } catch (e) {
+        this.connected = false;
+      }
+      if (this.connected) {
+        // The page load reset the sensor flip; re-enforce the stored choice.
+        if (this.hflip || this.vflip) await this.applyTransform();
+        this.liveView();
+      }
+    },
+
+    async applyTransform() {
+      // Reconfigure the camera with the new flip and reconnect the preview stream.
+      saveFlip(this.hflip, this.vflip);
+      try {
+        await fetch('/api/transform', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hflip: this.hflip, vflip: this.vflip }),
+        });
+        this.liveTick = Date.now();  // reopen the MJPEG stream on the reconfigured camera
+      } catch (e) { this.error = 'Failed to set flip'; }
+    },
+
+    liveView() {
+      this.live = true;
+      this.liveTick = Date.now();
+      this.pollMetered();
+    },
+
+    // Poll metered exposure/gain/Focus FoM while the viewfinder is up, so the
+    // chart can be focused right here before measuring.
+    pollMetered() {
+      if (this._polling) return;
+      this._polling = true;
+      const tick = async () => {
+        if (!this.live || !this.connected) { this._polling = false; return; }
+        try {
+          const r = await fetch('/api/controls');
+          if (r.ok) this.metered = await r.json();
+        } catch (e) { /* transient */ }
+        if (this.live) setTimeout(tick, 1500); else this._polling = false;
+      };
+      tick();
+    },
+
+    // Detect patches: capture a raw DNG of whatever is framed and place
+    // measurement regions on the edges it finds. Measurement is a separate,
+    // deliberate step so manual patches can be added/removed first.
+    async detectLive() {
+      this.busy = true; this.error = ''; this.results = null; this.rois = [];
+      try {
+        const r = await fetch(`/projects/${this.project}/mtf/capture`, { method: 'POST' });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          this.error = d.error || 'Capture failed — is a camera connected?';
+          return;
+        }
+        this.live = false;  // switch to the patch-editing view; the MJPEG stream closes
+        this.previewSrc = `/projects/${this.project}/mtf/preview?t=${Date.now()}`;  // imageLoaded re-fires
+        await this.autoDetect();
+      } catch (e) {
+        this.error = 'Capture request failed';
+      } finally {
+        this.busy = false;
+      }
+    },
+
+    // Default ROI box size: ~6% of the short sensor edge.
+    roiSize() {
+      return Math.max(96, Math.min(384, Math.round(Math.min(this._nat.w, this._nat.h) * 0.06)));
+    },
+
+    imageLoaded(e) {
+      this._nat = { w: e.target.naturalWidth, h: e.target.naturalHeight };
+      this.hasCapture = true;
+      this.$nextTick(() => this.drawRois());
+    },
+
+    async autoDetect() {
+      // Places patches only (unmeasured, pink); Measure produces the numbers.
+      this.busy = true; this.error = ''; this.results = null;
+      try {
+        const r = await fetch(`/projects/${this.project}/mtf/auto`, { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.error = d.error || 'Edge detection failed'; return; }
+        this.rois = d.rois.map((r2) => ({ x: r2.x, y: r2.y, w: r2.w, h: r2.h }));
+        if (!d.rois.length) this.error = 'No measurable edges found — check focus/framing, or slant the chart a few degrees.';
+        this.drawRois();
+      } catch (e) {
+        this.error = 'Edge detection request failed';
+      } finally {
+        this.busy = false;
+      }
+    },
+
+    clearRois() { this.rois = []; this.results = null; this.drawRois(); },
+
+    // Pointer position -> sensor coords.
+    _toSensor(e) {
+      const img = document.getElementById('mtfChartImg');
+      if (!img || !this._nat.w) return null;
+      const rect = img.getBoundingClientRect();
+      return {
+        x: (e.clientX - rect.left) * (this._nat.w / rect.width),
+        y: (e.clientY - rect.top) * (this._nat.h / rect.height),
+      };
+    },
+
+    // Click adds a default-size box (or removes the box under the cursor);
+    // click-drag draws a box of any size.
+    roiDown(e) {
+      const p = this._toSensor(e);
+      if (!p) return;
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+      this._drag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, moved: false };
+    },
+
+    roiMove(e) {
+      if (!this._drag) return;
+      const p = this._toSensor(e);
+      if (!p) return;
+      this._drag.x1 = p.x; this._drag.y1 = p.y;
+      // Ignore jitter below ~6 display px so a click stays a click.
+      const img = document.getElementById('mtfChartImg');
+      const k = img ? this._nat.w / img.getBoundingClientRect().width : 1;
+      if (Math.abs(p.x - this._drag.x0) > 6 * k || Math.abs(p.y - this._drag.y0) > 6 * k) this._drag.moved = true;
+      if (this._drag.moved) this.drawRois();
+    },
+
+    roiUp(e) {
+      const d = this._drag;
+      this._drag = null;
+      if (!d) return;
+      if (d.moved) {
+        const x = Math.round(Math.max(Math.min(d.x0, d.x1), 0));
+        const y = Math.round(Math.max(Math.min(d.y0, d.y1), 0));
+        const w = Math.round(Math.abs(d.x1 - d.x0));
+        const h = Math.round(Math.abs(d.y1 - d.y0));
+        if (w >= 32 && h >= 32) this.rois.push({ x, y, w, h });
+      } else {
+        // Plain click: remove the box under the cursor, else add a default box.
+        const hit = this.rois.findIndex(
+          (r) => d.x0 >= r.x && d.x0 <= r.x + r.w && d.y0 >= r.y && d.y0 <= r.y + r.h);
+        if (hit >= 0) this.rois.splice(hit, 1);
+        else {
+          const s = this.roiSize();
+          this.rois.push({
+            x: Math.round(Math.min(Math.max(d.x0 - s / 2, 0), this._nat.w - s)),
+            y: Math.round(Math.min(Math.max(d.y0 - s / 2, 0), this._nat.h - s)),
+            w: s, h: s,
+          });
+        }
+      }
+      this.results = null;
+      this.drawRois();
+    },
+
+    drawRois() {
+      const img = document.getElementById('mtfChartImg');
+      const cv = document.getElementById('mtfOverlay');
+      if (!img || !cv || !this._nat.w) return;
+      cv.width = img.clientWidth; cv.height = img.clientHeight;
+      const kx = cv.width / this._nat.w, ky = cv.height / this._nat.h;
+      const ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.lineWidth = 2;
+      ctx.font = '600 13px sans-serif';
+      this.rois.forEach((r, i) => {
+        const ok = this.results ? this.results[i] && this.results[i].ok : null;
+        ctx.strokeStyle = ok === null ? '#f06595' : ok ? '#2fb344' : '#e5484d';
+        ctx.strokeRect(r.x * kx, r.y * ky, r.w * kx, r.h * ky);
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.fillText(`${i + 1}`, r.x * kx + 4, r.y * ky + 16);
+      });
+      // Rubber band while drawing a new box.
+      const d = this._drag;
+      if (d && d.moved) {
+        ctx.strokeStyle = '#f06595';
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(Math.min(d.x0, d.x1) * kx, Math.min(d.y0, d.y1) * ky,
+                       Math.abs(d.x1 - d.x0) * kx, Math.abs(d.y1 - d.y0) * ky);
+        ctx.setLineDash([]);
+      }
+    },
+
+    async measure() {
+      this.measuring = true; this.error = '';
+      try {
+        const r = await fetch(`/projects/${this.project}/mtf/measure`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rois: this.rois }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.error = d.error || 'Measurement failed'; return; }
+        this.results = d.rois;
+        // The server snaps each box onto the strongest nearby edge; show that.
+        this.rois = d.rois.map((r2) => ({ x: r2.x, y: r2.y, w: r2.w, h: r2.h }));
+        this.drawRois();  // recolour boxes by result, at their snapped positions
+        this.$nextTick(() => requestAnimationFrame(() => this.renderCurves()));
+      } catch (e) {
+        this.error = 'Measurement request failed';
+      } finally {
+        this.measuring = false;
+      }
+    },
+
+    renderCurves() {
+      const ctx = document.getElementById('mtfCurveChart');
+      if (!ctx || !this.results) return;
+      this._chart?.destroy();
+      const palette = ['#f06595', '#3b82f6', '#2fb344', '#f1a204', '#a78bfa', '#22d3ee'];
+      const opts = chartOpts('Spatial frequency (cycles/pixel)', 'MTF');
+      opts.scales.x.type = 'linear';
+      opts.scales.x.max = 0.5;
+      opts.scales.y.min = 0;
+      opts.scales.y.max = 1.05;
+      this._chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          datasets: this.results.map((r, i) => ({ r, i })).filter(({ r }) => r.ok).map(({ r, i }) => ({
+            label: `#${i + 1}${r.zone ? ' ' + r.zone : ''}` + (r.mtf50 !== null ? ` (${r.mtf50.toFixed(3)})` : ''),
+            data: r.curve.map((p) => ({ x: p.f, y: p.mtf })),
+            borderColor: palette[i % palette.length],
+            backgroundColor: palette[i % palette.length],
+            pointRadius: 0, borderWidth: 2, tension: 0.2,
+          })),
+        },
+        options: opts,
+      });
+    },
+  };
+}
+
 function heat(t) {
   // 0 → blue, 0.5 → green, 1 → red
   t = Math.max(0, Math.min(1, t));

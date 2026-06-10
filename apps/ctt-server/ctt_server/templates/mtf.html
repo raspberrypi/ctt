@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}MTF · {{ project.name }}{% endblock %}
+{% block body %}
+{% set active_tab = 'mtf' %}
+{% include '_project_tabs.html' %}
+
+<!-- MTF (slanted edge) — independent of tuning runs, needs only the camera -->
+<div class="card" x-data='mtfApp({ project: {{ project.name|tojson }} })' x-init="init()">
+  <div class="card-head">
+    <h2>MTF (slanted edge)</h2>
+    <div class="btn-row">
+      <button class="btn ghost" x-show="!live && connected" x-cloak @click="liveView()">Live view</button>
+      <button class="btn" :class="{ primary: live }" :disabled="busy || measuring || (live && connected === false)"
+              @click="live ? detectLive() : autoDetect()">
+        <span x-text="busy ? 'Detecting…' : 'Detect patches'"></span>
+      </button>
+      <button class="btn ghost" x-show="!live && rois.length" x-cloak :disabled="measuring" @click="clearRois()">Clear</button>
+      <button class="btn primary" x-show="!live" x-cloak :disabled="!hasCapture || !rois.length || measuring" @click="measure()">
+        <span x-text="measuring ? 'Measuring…' : '● Measure'"></span>
+      </button>
+    </div>
+  </div>
+  <div class="banner error" x-show="error" x-text="error" x-cloak></div>
+  <div class="banner info" x-show="connected === false && !hasCapture" x-cloak>
+    No camera detected on the server — connect one to measure MTF.
+  </div>
+  <p class="hint" x-show="live">Frame an ISO 12233 / eSFR slanted-edge chart and focus (watch the Focus FoM),
+    then press Detect patches: a raw DNG is captured and measurement regions are placed on the edges it finds.</p>
+
+  <!-- Live viewfinder for framing/focusing -->
+  <div class="preview-wrap mt" x-show="live && connected" x-cloak>
+    <img id="mtfLiveImg" draggable="false" :src="connected && live ? ('/api/preview?t=' + liveTick) : ''" alt="live preview">
+  </div>
+  <div class="caminfo mt" x-show="live && connected" x-cloak>
+    <div class="caminfo-row" style="grid-template-columns: repeat(5, 1fr)">
+      <div><span class="k">Sensor</span><span class="v" x-text="camera.model || '—'"></span></div>
+      <div><span class="k">Resolution</span><span class="v" x-text="camera.resolution ? camera.resolution[0] + ' × ' + camera.resolution[1] : '—'"></span></div>
+      <div>
+        <span class="k">Flips</span>
+        <div class="seg compact" style="align-self:flex-start">
+          <button type="button" :class="{active: hflip}" @click="hflip=!hflip; applyTransform()" title="Horizontal flip">H</button>
+          <button type="button" :class="{active: vflip}" @click="vflip=!vflip; applyTransform()" title="Vertical flip">V</button>
+        </div>
+      </div>
+    </div>
+    <div class="caminfo-row" style="grid-template-columns: repeat(5, 1fr)">
+      <div><span class="k">Exposure</span><span class="v" x-text="(metered.exposure/1000).toFixed(1) + ' ms'"></span></div>
+      <div><span class="k">Gain</span><span class="v" x-text="metered.gain + '×'"></span></div>
+      <div><span class="k">Colour temp</span><span class="v" x-text="metered.colour_temp + ' K'"></span></div>
+      <div><span class="k">Lux</span><span class="v" x-text="metered.lux + ' lx'"></span></div>
+      <div><span class="k">Focus FoM</span><span class="v" x-text="metered.focus_fom"></span></div>
+    </div>
+  </div>
+
+  <!-- Captured chart with measurement regions -->
+  <div class="mtf-wrap mt" x-show="!live && hasCapture" x-cloak @resize.window="drawRois()">
+    <img id="mtfChartImg" :src="previewSrc" draggable="false" @load="imageLoaded($event)">
+    <canvas id="mtfOverlay" @dragstart.prevent
+            @pointerdown="roiDown($event)" @pointermove="roiMove($event)"
+            @pointerup="roiUp($event)" @pointercancel="_drag = null; drawRois()"></canvas>
+  </div>
+  <p class="hint" x-show="!live && hasCapture" x-cloak>Adjust the patches if needed — drag to draw your own
+    over a single clean edge (it self-centres when measured), click one to remove it — then press Measure.</p>
+
+  <template x-if="results">
+    <div>
+      <table class="mt">
+        <thead><tr><th>Region</th><th>Zone</th><th>MTF50 (cy/px)</th><th>Edge angle</th><th>Status</th></tr></thead>
+        <tbody>
+          <template x-for="(r, i) in results" :key="i">
+            <tr>
+              <td x-text="'#' + (i + 1)"></td>
+              <td x-text="r.zone || '–'"></td>
+              <td class="mono" x-text="r.ok && r.mtf50 !== null ? r.mtf50.toFixed(3) : '–'"></td>
+              <td class="mono" x-text="r.ok ? r.angle_deg + '°' : '–'"></td>
+              <td><span :class="r.ok ? '' : 'muted'" x-text="r.ok ? '✓' : r.reason"></span></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <div class="chart-box mt" x-show="results.some(r => r.ok)"><canvas id="mtfCurveChart"></canvas></div>
+      <p class="hint">Spatial frequency response measured on the raw green plane (linear, no ISP sharpening) —
+        the true lens+sensor MTF. MTF50 is where contrast falls to half; higher is sharper. Compare centre
+        against corners to spot decentred or tilted lenses.</p>
+    </div>
+  </template>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/alpine.min.js') }}" defer></script>
+{% endblock %}

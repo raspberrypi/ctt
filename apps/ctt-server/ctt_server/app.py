@@ -28,7 +28,7 @@ from flask import (
 
 from ctt.devices import LightboxError, get_shared_lightbox
 
-from . import ctt_runner, results
+from . import ctt_runner, mtf, results
 from .camera import (
     MJPEG_CONTENT_TYPE,
     CameraError,
@@ -533,6 +533,74 @@ def create_app(workspace_root: str | None = None) -> Flask:
         files = ctt_runner.output_files(proj, ['pisp', 'vc4'])
         available = {t: f for t, f in files.items() if f['json']}
         return render_template('preview.html', project=proj, files=available, runs=_run_info(available))
+
+    # --- MTF (slanted-edge) --------------------------------------------------
+    # Chart captures live in <project>/mtf/, which CTT runs never see (they only
+    # scan project-root *.dng), so MTF charts can't pollute a calibration.
+
+    @app.route('/projects/<name>/mtf')
+    def mtf_page(name: str):
+        proj = get_project_or_404(name)
+        return render_template('mtf.html', project=proj)
+
+    @app.route('/projects/<name>/mtf/capture', methods=['POST'])
+    def mtf_capture(name: str):
+        """Capture a fresh full-res frame of the MTF chart (raw DNG + preview JPEG)."""
+        proj = get_project_or_404(name)
+        cam = camera_or_503()
+        try:
+            dng_bytes, jpg_bytes, _meta = cam.capture_still()
+        except CameraError as err:
+            return jsonify({'error': str(err)}), 503
+        mtf_dir = proj.path / 'mtf'
+        mtf_dir.mkdir(parents=True, exist_ok=True)
+        (mtf_dir / 'chart.dng').write_bytes(dng_bytes)
+        (mtf_dir / 'chart.jpg').write_bytes(jpg_bytes)
+        return jsonify({'ok': True})
+
+    @app.route('/projects/<name>/mtf/preview')
+    def mtf_preview(name: str):
+        proj = get_project_or_404(name)
+        jpg = proj.path / 'mtf' / 'chart.jpg'
+        if not jpg.exists():
+            abort(404)
+        return send_file(jpg, mimetype='image/jpeg')
+
+    @app.route('/projects/<name>/mtf/auto', methods=['POST'])
+    def mtf_auto(name: str):
+        """Auto-detect measurable slanted edges on the captured chart."""
+        proj = get_project_or_404(name)
+        dng = proj.path / 'mtf' / 'chart.dng'
+        if not dng.exists():
+            return jsonify({'error': 'No chart captured yet'}), 404
+        try:
+            rois = mtf.auto_detect(str(dng))
+        except Exception:
+            logger.exception('MTF auto-detect failed for %s', name)
+            return jsonify({'error': 'Edge detection failed (is the capture a valid DNG?)'}), 500
+        return jsonify({'rois': rois})
+
+    @app.route('/projects/<name>/mtf/measure', methods=['POST'])
+    def mtf_measure(name: str):
+        """Measure the MTF of each requested ROI on the captured chart's raw DNG."""
+        proj = get_project_or_404(name)
+        dng = proj.path / 'mtf' / 'chart.dng'
+        if not dng.exists():
+            return jsonify({'error': 'No chart captured yet'}), 404
+        body = request.get_json(force=True) or {}
+        rois = body.get('rois') or []
+        try:
+            rois = [{k: int(r[k]) for k in ('x', 'y', 'w', 'h')} for r in rois]
+        except (KeyError, TypeError, ValueError):
+            return jsonify({'error': 'rois must be a list of {x, y, w, h}'}), 400
+        if not rois:
+            return jsonify({'error': 'No ROIs supplied'}), 400
+        try:
+            results_list = mtf.measure_rois(str(dng), rois)
+        except Exception:
+            logger.exception('MTF measurement failed for %s', name)
+            return jsonify({'error': 'MTF measurement failed (is the capture a valid DNG?)'}), 500
+        return jsonify({'rois': results_list})
 
     @app.route('/projects/<name>/results/data')
     def results_data(name: str):
