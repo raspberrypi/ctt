@@ -387,15 +387,21 @@ function imagesApp(cfg) {
     ...createLoupe({ imgId: 'imgsViewerImg', canvasId: 'imgsViewerLoupe', markerId: 'imgsViewerMarker' }),
     project: cfg.project,
     captures: cfg.captures || [],
+    rawpy: !!cfg.rawpy,
     busy: false,
     uploadMsg: '',
-    viewer: { open: false, src: '', filename: '', developed: false },
+    viewer: { open: false, src: '', filename: '', developed: false, loading: false },
+    exif: { open: false, filename: '', loading: false, error: '', summary: [], tags: [] },
 
     // Grid thumbnails: half-size develop for DNG-only captures (full-res is too
     // slow on a Pi); saved JPEGs are served as-is and scaled by the browser.
     thumbSrc(c) {
       return `/projects/${this.project}/captures/${encodeURIComponent(c.filename)}/jpeg?thumb=1`;
     },
+
+    // Default preview source for a thumbnail click: the saved JPEG if there is
+    // one, else a rawpy develop of the DNG.
+    bestSource(c) { return c.jpeg === 'saved' ? 'jpeg' : 'raw'; },
 
     async uploadFiles(e) {
       const files = Array.from(e.target.files || []);
@@ -428,17 +434,18 @@ function imagesApp(cfg) {
     },
 
     async remove(filename) {
+      if (!confirm(`Delete ${filename}?`)) return;
       const r = await fetch(`/projects/${this.project}/captures/${encodeURIComponent(filename)}/delete`, { method: 'POST' });
       if (r.ok) this.captures = this.captures.filter((c) => c.filename !== filename);
     },
 
-    openViewer(c) {
-      if (!c.jpeg) return;
+    openViewer(c, source) {
       this.viewer = {
         open: true,
         filename: c.filename,
-        developed: c.jpeg === 'dng',
-        src: `/projects/${this.project}/captures/${encodeURIComponent(c.filename)}/jpeg`,
+        developed: source === 'raw',
+        loading: source === 'raw',  // a rawpy develop takes seconds; cleared on <img> load
+        src: `/projects/${this.project}/captures/${encodeURIComponent(c.filename)}/jpeg?source=${source}`,
       };
     },
 
@@ -446,6 +453,21 @@ function imagesApp(cfg) {
       this.viewer.open = false;
       this.viewer.src = '';  // free the (large) decoded image
       this.loupe.active = false;
+    },
+
+    async openExif(c) {
+      this.exif = { open: true, filename: c.filename, loading: true, error: '', summary: [], tags: [] };
+      try {
+        const r = await fetch(`/projects/${this.project}/captures/${encodeURIComponent(c.filename)}/exif`);
+        if (!r.ok) { this.exif.error = 'Failed to read EXIF metadata'; return; }
+        const d = await r.json();
+        this.exif.summary = d.summary || [];
+        this.exif.tags = d.tags || [];
+      } catch (e) {
+        this.exif.error = 'EXIF request failed';
+      } finally {
+        this.exif.loading = false;
+      }
     },
   };
 }
