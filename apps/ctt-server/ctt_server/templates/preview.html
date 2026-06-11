@@ -59,6 +59,12 @@
               <button type="button" :class="{active: vflip}" @click="vflip=!vflip; applyTransform()" :disabled="busy" title="Vertical flip">V</button>
             </div>
           </div>
+          <div>
+            <span class="k">FPS <span style="text-transform:none" x-text="metered.measured_fps ? '· ' + metered.measured_fps + ' actual' : ''"></span></span>
+            <input type="number" min="0" max="120" step="1" x-model.number="fpsTarget" @change="applyFps()"
+                   title="Fixed framerate; 0 = unconstrained (variable frame duration, allows long exposures)"
+                   style="width:90px; padding:4px 8px; font-size:0.85rem">
+          </div>
         </div>
         <div class="caminfo-row" style="grid-template-columns: repeat(4, 1fr)">
           <div><span class="k">Exposure</span><span class="v" x-text="(metered.exposure/1000).toFixed(1) + ' ms'"></span></div>
@@ -81,12 +87,15 @@
         </label>
       </div>
       <div class="field" :style="controls.auto_exposure ? 'opacity:.45;pointer-events:none' : ''">
-        <label>Exposure time — <span x-text="(controls.exposure/1000).toFixed(1)"></span> ms</label>
-        <input type="range" min="100" max="100000" step="100" x-model.number="controls.exposure" @change="applyControls()">
+        <label>Exposure time — <span x-text="(controls.exposure/1000).toFixed(1)"></span> ms
+          <span class="muted" x-show="expMax()" x-cloak>(max <span x-text="(expMax()/1000).toFixed(0)"></span> ms at this FPS)</span></label>
+        <input type="range" :min="controls.exposure_min" :max="expMax()" step="100"
+               x-model.number="controls.exposure" @change="applyControls()">
       </div>
       <div class="field" :style="controls.auto_exposure ? 'opacity:.45;pointer-events:none' : ''">
         <label>Analogue gain — <span x-text="controls.gain"></span>×</label>
-        <input type="range" min="1" max="16" step="0.1" x-model.number="controls.gain" @change="applyControls()">
+        <input type="range" :min="controls.gain_min" :max="controls.gain_max" step="0.1"
+               x-model.number="controls.gain" @change="applyControls()">
       </div>
       <div class="field" :style="!controls.auto_exposure ? 'opacity:.45;pointer-events:none' : ''">
         <div class="spread" style="align-items:baseline">

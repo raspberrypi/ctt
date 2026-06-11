@@ -64,6 +64,7 @@ class Picamera2Camera:
         self._lock = threading.Lock()
         self._ev = 0.0  # exposure compensation (EV); tracked here as metadata may omit it
         self._auto = True  # AeEnable state; tracked so we report it reliably (AeLocked is ambiguous)
+        self._fps = 30.0  # framerate target; 0 = unconstrained (variable frame duration)
         # Optionally start the pipeline with a specific tuning file (e.g. a freshly
         # generated CTT tuning, for the Results-page live preview test). None = the
         # camera's built-in default tuning.
@@ -105,12 +106,28 @@ class Picamera2Camera:
 
         return Transform(hflip=1 if self._hflip else 0, vflip=1 if self._vflip else 0)
 
+    def _frame_duration_limits(self) -> tuple[int, int]:
+        """FrameDurationLimits for the current fps target (0 = unconstrained).
+
+        A fixed rate pins both limits (which also caps exposure at one frame,
+        and is clamped by libcamera to the control's advertised range); 0 spans
+        the camera's full FrameDurationLimits range so long exposures can
+        stretch the frame, instead of create_video_configuration's locked-30fps
+        default clamping them at ~33 ms.
+        """
+        if self._fps:
+            frame_duration = int(round(1_000_000 / self._fps))
+            return (frame_duration, frame_duration)
+        fd_min, fd_max, _ = self._picam2.camera_controls['FrameDurationLimits']
+        return (int(fd_min), int(fd_max))
+
     def _video_config(self):
         return self._picam2.create_video_configuration(
             main={'size': self._preview_size, 'format': 'RGB888'},
             raw={'size': self._raw_size},
             transform=self._transform(),
             buffer_count=4,
+            controls={'FrameDurationLimits': self._frame_duration_limits()},
         )
 
     def set_transform(self, hflip: bool, vflip: bool) -> dict:
@@ -126,6 +143,13 @@ class Picamera2Camera:
     # --- controls ----------------------------------------------------------
     def get_controls(self) -> dict:
         md = self._picam2.capture_metadata()
+        frame_duration = int(md.get('FrameDuration', 0))
+        # The sensor's advertised control ranges (mode-dependent) are the
+        # absolute truth for the UI sliders.
+        ctrl = self._picam2.camera_controls
+        exp_min, exp_max, _ = ctrl['ExposureTime']
+        gain_min, gain_max, _ = ctrl['AnalogueGain']
+        fd_min, fd_max, _ = ctrl['FrameDurationLimits']
         return {
             'exposure': int(md.get('ExposureTime', 0)),
             'gain': round(float(md.get('AnalogueGain', 0.0)), 3),
@@ -134,6 +158,14 @@ class Picamera2Camera:
             'focus_fom': int(md.get('FocusFoM', 0)),  # focus figure of merit (higher = sharper)
             'ev': round(self._ev, 2),
             'auto_exposure': self._auto,
+            'fps': self._fps,  # user target; 0 = unconstrained
+            'measured_fps': round(1_000_000 / frame_duration, 1) if frame_duration else 0,
+            'exposure_min': int(exp_min),
+            'exposure_max': int(exp_max),
+            'gain_min': round(float(gain_min), 3),
+            'gain_max': round(float(gain_max), 3),
+            'frame_duration_min': int(fd_min),
+            'frame_duration_max': int(fd_max),
         }
 
     def set_controls(self, controls: dict) -> dict:
@@ -152,6 +184,9 @@ class Picamera2Camera:
         if 'ev' in controls and controls['ev'] is not None:
             self._ev = float(controls['ev'])
             new['ExposureValue'] = self._ev  # AEC bias; only affects auto-exposure
+        if controls.get('fps') is not None:
+            self._fps = max(float(controls['fps']), 0.0)
+            new['FrameDurationLimits'] = self._frame_duration_limits()
         if 'awb' in controls:
             new['AwbEnable'] = bool(controls['awb'])
         if new:

@@ -155,6 +155,7 @@ function captureApp(cfg) {
     counts: { macbeth: 0, alsc: 0, cac: 0, dark: 0 },
     form: { image_type: 'macbeth', colour_temp: 6500, lux: 1000, frames: 1 },
     controls: { exposure: 10000, gain: 1.0, auto_exposure: true, colour_temp: 0, lux: 0, ev: 0 },
+    fpsTarget: 30,  // framerate target; 0 = unconstrained (variable frame duration)
     camera: { model: '', resolution: null },
     metered: { exposure: 0, gain: 0, colour_temp: 0, lux: 0, focus_fom: 0 },
     clip: { r: 0, g: 0, b: 0 },
@@ -279,8 +280,22 @@ function captureApp(cfg) {
     async loadControls() {
       try {
         const r = await fetch('/api/controls');
-        if (r.ok) this.controls = await r.json();
+        if (r.ok) { this.controls = await r.json(); this.fpsTarget = this.controls.fps || 0; }
       } catch (e) { /* preview not critical */ }
+    },
+
+    async applyFps() {
+      try {
+        const r = await fetch('/api/controls', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fps: this.fpsTarget || 0 }),
+        });
+        if (r.ok) {
+          const c = await r.json();
+          this.fpsTarget = c.fps || 0;
+          this.controls.fps = c.fps;  // keep applyControls' payload in step with the new target
+        }
+      } catch (e) { this.error = 'Failed to set framerate'; }
     },
 
     async applyControls() {
@@ -289,8 +304,19 @@ function captureApp(cfg) {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(this.controls),
         });
-        if (r.ok) this.controls = await r.json();
+        // In manual mode the form is the source of truth: the response carries
+        // frame metadata that lags the request by a few frames, so writing it
+        // back would bounce the sliders (the metered box shows the actuals).
+        if (r.ok && this.controls.auto_exposure) this.controls = await r.json();
       } catch (e) { this.error = 'Failed to set controls'; }
+    },
+
+    // Slider bound for manual exposure: the camera's advertised limit,
+    // additionally capped at one frame time when a fixed framerate is set.
+    expMax() {
+      if (!this.controls.exposure_max) return null;  // limits not fetched yet
+      const fpsCap = this.fpsTarget ? Math.floor(1000000 / this.fpsTarget) : this.controls.frame_duration_max;
+      return Math.min(this.controls.exposure_max, fpsCap);
     },
 
     async pollHistogram() {
@@ -304,6 +330,12 @@ function captureApp(cfg) {
           }
           const cr = await fetch('/api/controls');  // live metered estimates for the info box
           if (cr.ok) this.metered = await cr.json();
+          // In auto mode the greyed-out sliders track the values AEC is
+          // actually using, so switching to manual continues from there.
+          if (this.controls.auto_exposure) {
+            this.controls.exposure = this.metered.exposure;
+            this.controls.gain = this.metered.gain;
+          }
           // Macbeth finder: only while the Macbeth image type is selected.
           if (this.form.image_type === 'macbeth') {
             const mr = await fetch('/api/macbeth');
@@ -700,6 +732,7 @@ function resultsApp(cfg) {
     camera: {},           // preview page: {model, resolution} for the live sensor-info box
     metered: { exposure: 0, gain: 0, colour_temp: 0, lux: 0 },  // live metered values
     controls: { auto_exposure: true, exposure: 0, gain: 1, ev: 0 },  // exposure panel state
+    fpsTarget: 30,  // framerate target; 0 = unconstrained (variable frame duration)
     lightbox: { present: false, channel: null, intensity: 0, illuminants: {} },  // optional lightbox device
     colour: null,         // current live ΔE reading (for whichever tuning is loaded)
     liveColour: true,     // semi-live colour measurement while previewing
@@ -812,7 +845,11 @@ function resultsApp(cfg) {
         const h = await r.json();
         if (h.model) this.camera.model = h.model;
         if (h.resolution) this.camera.resolution = h.resolution;
-        if (h.controls) { this.metered = { ...h.controls }; this.controls = { ...h.controls }; }
+        if (h.controls) {
+          this.metered = { ...h.controls };
+          this.controls = { ...h.controls };
+          this.fpsTarget = h.controls.fps || 0;
+        }
       } catch (e) { /* best effort */ }
     },
 
@@ -822,8 +859,33 @@ function resultsApp(cfg) {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(this.controls),
         });
-        if (r.ok) this.controls = await r.json();
+        // In manual mode the form is the source of truth: the response carries
+        // frame metadata that lags the request by a few frames, so writing it
+        // back would bounce the sliders (the metered box shows the actuals).
+        if (r.ok && this.controls.auto_exposure) this.controls = await r.json();
       } catch (e) { this.testError = 'Failed to set controls'; }
+    },
+
+    // Slider bound for manual exposure: the camera's advertised limit,
+    // additionally capped at one frame time when a fixed framerate is set.
+    expMax() {
+      if (!this.controls.exposure_max) return null;  // limits not fetched yet
+      const fpsCap = this.fpsTarget ? Math.floor(1000000 / this.fpsTarget) : this.controls.frame_duration_max;
+      return Math.min(this.controls.exposure_max, fpsCap);
+    },
+
+    async applyFps() {
+      try {
+        const r = await fetch('/api/controls', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fps: this.fpsTarget || 0 }),
+        });
+        if (r.ok) {
+          const c = await r.json();
+          this.fpsTarget = c.fps || 0;
+          this.controls.fps = c.fps;  // keep applyControls' payload in step with the new target
+        }
+      } catch (e) { this.testError = 'Failed to set framerate'; }
     },
 
     // Poll live metered exposure/gain/CT/lux while the preview is running.
@@ -835,6 +897,12 @@ function resultsApp(cfg) {
         try {
           const cr = await fetch('/api/controls');
           if (cr.ok) this.metered = await cr.json();
+          // In auto mode the greyed-out sliders track the values AEC is
+          // actually using, so switching to manual continues from there.
+          if (this.controls.auto_exposure) {
+            this.controls.exposure = this.metered.exposure;
+            this.controls.gain = this.metered.gain;
+          }
         } catch (e) { /* transient */ }
         if (this.testing) setTimeout(tick, 1500); else this._polling = false;
       };
