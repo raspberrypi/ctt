@@ -229,6 +229,7 @@ def parse_tuning_file(path: str | Path, metrics_path: str | Path | None = None) 
             'config': raw_metrics.get('config', {}),
             'lux': raw_metrics.get('lux', {}),
             'alsc': raw_metrics.get('alsc', {}),
+            'black_level': raw_metrics.get('black_level', {}),
         }
         if ccm_default:
             metrics['ccm_default'] = sorted(ccm_default, key=lambda c: c.get('ct', 0))

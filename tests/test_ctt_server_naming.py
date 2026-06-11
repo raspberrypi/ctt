@@ -34,17 +34,27 @@ def test_cac_roundtrips_and_detects():
     assert naming.detect_type(name) == 'cac'
 
 
+def test_dark_builds_and_detects():
+    assert naming.build_filename('dark') == 'dark_0.dng'
+    name = naming.build_filename('dark', index=2)
+    assert name == 'dark_2.dng'
+    assert naming.detect_type(name) == 'dark'
+    assert get_col_lux(name) == (None, None)
+
+
 def test_macbeth_requires_lux():
     with pytest.raises(naming.NamingError):
         naming.build_filename('macbeth', 5000, label='d65')
 
 
 def test_macbeth_label_must_not_collide_with_type_markers():
-    # Labels containing alsc/cac would be misdetected as those image types.
+    # Labels containing alsc/cac/dark would be misdetected as those image types.
     with pytest.raises(naming.NamingError):
         naming.build_filename('macbeth', 5000, lux=800, label='alsc_room')
     with pytest.raises(naming.NamingError):
         naming.build_filename('macbeth', 5000, lux=800, label='cacophony')
+    with pytest.raises(naming.NamingError):
+        naming.build_filename('macbeth', 5000, lux=800, label='darkroom')
 
 
 def test_macbeth_name_contains_neither_marker():
@@ -75,6 +85,7 @@ def test_invalid_inputs_raise():
         ('d65_5858k_1344l.dng', True),
         ('alsc_5000k_0.dng', True),
         ('cac_4000k_1.dng', True),
+        ('dark_0.dng', True),  # dark frames need no tags
         ('d65_5858k.dng', False),  # macbeth missing lux
         ('noexif.dng', False),  # no colour temp
         ('photo.jpg', False),  # not a dng
@@ -92,6 +103,11 @@ def test_next_index_increments():
     assert naming.next_index(existing, 'alsc', 4000) == 0
 
 
+def test_next_index_dark():
+    assert naming.next_index([], 'dark') == 0
+    assert naming.next_index(['dark_0.dng', 'dark_1.dng'], 'dark') == 2
+
+
 def test_parse_filename_macbeth():
     assert naming.parse_filename('d65_5858k_1344l.dng') == ('macbeth', 5858, 1344, 'd65')
 
@@ -102,6 +118,10 @@ def test_parse_filename_alsc():
 
 def test_parse_filename_cac():
     assert naming.parse_filename('cac_4500k_0.dng') == ('cac', 4500, None, None)
+
+
+def test_parse_filename_dark():
+    assert naming.parse_filename('dark_3.dng') == ('dark', None, None, None)
 
 
 def test_parse_filename_rejects_untagged():

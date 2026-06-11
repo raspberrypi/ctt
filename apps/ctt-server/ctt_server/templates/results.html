@@ -97,6 +97,34 @@
     <p class="hint">Luminance per lux (Y / lux·exp·gain) for each capture against colour temperature — ideally flat. The dashed line is the value the lux calibration uses. A sloped/scattered response means the sensor's luminance-per-lux is colour-temperature dependent, so a single lux reference will read off away from the anchor.</p>
   </div>
 
+  <!-- Black level vs total exposure -->
+  <div class="card mt" x-show="metrics && metrics.black_level && (metrics.black_level.frames || []).length" x-cloak>
+    <div class="card-head">
+      <h2>Black level</h2>
+      <span class="chip" x-show="metrics?.black_level?.source === 'override'" x-cloak>config override in use</span>
+    </div>
+    <template x-if="!blSinglePoint()">
+      <div>
+        <div class="chart-box"><canvas id="blackLevelChart"></canvas></div>
+        <p class="hint">Per-channel black level of each dark frame against total exposure (shutter × gain) — ideally flat
+          lines at the calibrated value (dashed). A slope means the pedestal drifts with exposure (dark current);
+          diverging R/G/B channels suggest a light leak during the dark captures.</p>
+      </div>
+    </template>
+    <template x-if="blSinglePoint()">
+      <div>
+        <div class="stats">
+          <template x-for="s in blStats()" :key="s[0]">
+            <div class="stat"><div class="n" x-text="s[1]"></div><div class="l" x-text="s[0]"></div></div>
+          </template>
+        </div>
+        <p class="hint">All dark frames share one total exposure (shutter × gain), so there is no trend to plot —
+          values are the per-channel means across the dark frames. Capture darks at several shutter/gain settings
+          to map black level against exposure. Diverging R/G/B values suggest a light leak during the captures.</p>
+      </div>
+    </template>
+  </div>
+
   <!-- Health + Coverage (only present once a run has written the sidecar) -->
   <template x-if="metrics">
     <div>
@@ -121,6 +149,7 @@
         <div class="stats">
           <div class="stat"><div class="n" x-text="metrics.counts.macbeth ?? '–'"></div><div class="l">Macbeth imgs</div></div>
           <div class="stat"><div class="n" x-text="metrics.counts.alsc ?? '–'"></div><div class="l">ALSC imgs</div></div>
+          <div class="stat" x-show="metrics.counts.dark"><div class="n" x-text="metrics.counts.dark"></div><div class="l">Dark imgs</div></div>
           <div class="stat"><div class="n" x-text="ctRange()"></div><div class="l">CT range (K)</div></div>
           <div class="stat"><div class="n" x-text="metrics.coverage.ccm_matrices ?? '–'"></div><div class="l">CCM matrices</div></div>
           <div class="stat"><div class="n" x-text="metrics.coverage.awb_points ?? '–'"></div><div class="l">AWB points</div></div>
@@ -137,6 +166,7 @@
       <div class="stat" x-show="charts.noise"><div class="n" x-text="charts.noise && fmt(charts.noise.reference_slope)"></div><div class="l">Noise slope</div></div>
       <div class="stat" x-show="charts.noise"><div class="n" x-text="charts.noise && fmt(charts.noise.reference_constant)"></div><div class="l">Noise constant</div></div>
       <div class="stat" x-show="summary?.black_level !== undefined"><div class="n" x-text="summary?.black_level"></div><div class="l">Black level</div></div>
+      <div class="stat" x-show="metrics?.black_level?.measured !== undefined"><div class="n" x-text="metrics?.black_level?.measured"></div><div class="l">Measured black level</div></div>
     </div>
   </div>
 </div>

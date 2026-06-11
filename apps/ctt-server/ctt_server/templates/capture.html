@@ -137,9 +137,10 @@
           <button type="button" :class="{active: form.image_type==='macbeth'}" @click="form.image_type='macbeth'">Macbeth</button>
           <button type="button" :class="{active: form.image_type==='alsc'}" @click="form.image_type='alsc'">ALSC</button>
           <button type="button" :class="{active: form.image_type==='cac'}" @click="form.image_type='cac'">CAC</button>
+          <button type="button" :class="{active: form.image_type==='dark'}" @click="form.image_type='dark'">Dark</button>
         </div>
       </div>
-      <div class="field" style="flex:0 0 150px; margin:0">
+      <div class="field" x-show="form.image_type!=='dark'" style="flex:0 0 150px; margin:0">
         <label>Colour temp (K)</label>
         <input type="number" x-model.number="form.colour_temp" min="1000" max="12000" step="50">
       </div>
@@ -162,6 +163,7 @@
       <span x-show="form.image_type==='macbeth'"> · Macbeth chart — needs colour temp + lux.</span>
       <span x-show="form.image_type==='alsc'"> · Defocused, uniform flat field — colour temp only.</span>
       <span x-show="form.image_type==='cac'"> · Chromatic-aberration dot chart (PiSP) — colour temp only.</span>
+      <span x-show="form.image_type==='dark'"> · Lens cap on, completely dark — no tags. Capture several at different shutter/gain settings to map black level vs exposure.</span>
     </div>
     <div class="banner error mt" x-show="error" x-text="error" x-cloak></div>
   </div>
@@ -177,6 +179,7 @@
       <div class="stat"><div class="n" x-text="counts.macbeth"></div><div class="l">Macbeth</div></div>
       <div class="stat"><div class="n" x-text="counts.alsc"></div><div class="l">ALSC</div></div>
       <div class="stat"><div class="n" x-text="counts.cac"></div><div class="l">CAC</div></div>
+      <div class="stat"><div class="n" x-text="counts.dark"></div><div class="l">Dark</div></div>
     </div>
     <ul class="checklist mt">
       <template x-for="item in checklist()" :key="item.key">

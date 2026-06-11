@@ -21,7 +21,7 @@ from pathlib import Path
 from .sessions import Project
 
 VALID_TARGETS = ('pisp', 'vc4')
-VALID_MODES = ('full', 'alsc-only', 'colour-only')
+VALID_MODES = ('full', 'alsc-only', 'colour-only', 'blacklevel-only')
 
 # Attaching a handler to the process-global `ctt` logger is not safe to do
 # concurrently, and CTT is not designed for concurrent runs, so serialise.
@@ -119,6 +119,7 @@ def run_ctt_stream(
         config_path = write_config(project, options or {})
         alsc_only = mode == 'alsc-only'
         colour_only = mode == 'colour-only'
+        black_level_only = mode == 'blacklevel-only'
         # Honour per-capture exclusion: pass the include-list only when something
         # is excluded, so the default run still picks up stray on-disk DNGs that
         # aren't registered in project.json (exactly as before).
@@ -150,6 +151,7 @@ def run_ctt_stream(
                     targets,
                     alsc_only=alsc_only,
                     colour_only=colour_only,
+                    black_level_only=black_level_only,
                     images=images,
                 )
             except ArgError as err:

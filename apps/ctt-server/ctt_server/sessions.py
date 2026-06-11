@@ -18,6 +18,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ctt.core.camera import burst_group_key
+
 from . import naming
 
 _SIDECAR = 'project.json'
@@ -49,7 +51,7 @@ class Capture:
 
     filename: str
     image_type: str
-    colour_temp: int
+    colour_temp: int | None = None  # dark frames have no colour temperature
     lux: int | None = None
     label: str | None = None
     controls: dict = field(default_factory=dict)
@@ -112,7 +114,7 @@ class Project:
         self,
         dng_bytes: bytes,
         image_type: str,
-        colour_temp: int,
+        colour_temp: int | None = None,
         *,
         lux: int | None = None,
         label: str | None = None,
@@ -125,7 +127,7 @@ class Project:
         If jpeg_bytes is given, a full-resolution JPEG is written alongside the DNG
         under the same stem (e.g. foo.dng -> foo.jpg) for in-browser preview.
         indexed=True gives Macbeth captures a _<n> suffix (burst frames; CTT
-        averages same-name groups internally); ALSC/CAC are always indexed.
+        averages same-name groups internally); ALSC/CAC/dark are always indexed.
         """
         # Macbeth filenames are prefixed with the project (sensor) name by default.
         if image_type == 'macbeth' and not label:
@@ -161,11 +163,13 @@ class Project:
         return capture
 
     def import_capture(self, filename: str, data: bytes) -> Capture:
-        """Register an uploaded image, auto-tagging from its CTT-format filename.
+        """Register an uploaded image, renaming it to the project's naming scheme.
 
-        The file is stored under its own (sanitised) name — it is assumed to
-        already follow the CTT convention. Raises naming.NamingError if the name
-        cannot be parsed into valid tags.
+        Tags are parsed from the uploaded filename (which must follow the CTT
+        convention; naming.NamingError otherwise), then the file is stored
+        through add_capture so uploads are named exactly like captures —
+        Macbeth labels become the project name, ALSC/CAC/dark get their plain
+        canonical names — and the Images-tab burst grouping applies uniformly.
         """
         # Strip any path and normalise a .dng extension to lowercase so names
         # like FOO_5000K_800L.DNG still parse via CTT's (lowercase) extension regex.
@@ -174,18 +178,12 @@ class Project:
         if dot and ext.lower() == 'dng':
             name = f'{stem}.dng'
 
-        image_type, colour_temp, lux, label = naming.parse_filename(name)
-        self.path.mkdir(parents=True, exist_ok=True)
-        (self.path / name).write_bytes(data)
-        capture = Capture(filename=name, image_type=image_type, colour_temp=colour_temp, lux=lux, label=label)
-        # Overwrite-in-place on a repeat upload of the same filename (matches add_capture).
-        existing = next((i for i, c in enumerate(self.captures) if c.filename == name), None)
-        if existing is not None:
-            self.captures[existing] = capture
-        else:
-            self.captures.append(capture)
-        self.save()
-        return capture
+        image_type, colour_temp, lux, _label = naming.parse_filename(name)
+        # A trailing _<n> on a Macbeth name marks a burst frame: keep it indexed
+        # so multi-frame uploads get distinct names; plain names keep the
+        # index-free overwrite semantics, exactly as captures do.
+        indexed = image_type == 'macbeth' and burst_group_key(name) != name
+        return self.add_capture(data, image_type, colour_temp, lux=lux, indexed=indexed)
 
     def delete_capture(self, filename: str) -> None:
         target = self.path / filename
@@ -209,7 +207,7 @@ class Project:
         return filename.endswith('.dng') and (self.path / filename).with_suffix('.jpg').exists()
 
     def counts(self) -> dict[str, int]:
-        out = {'macbeth': 0, 'alsc': 0, 'cac': 0}
+        out = {'macbeth': 0, 'alsc': 0, 'cac': 0, 'dark': 0}
         for c in self.captures:
             out[c.image_type] = out.get(c.image_type, 0) + 1
         return out

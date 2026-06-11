@@ -16,7 +16,7 @@ def test_session_add_and_count(tmp_path):
     proj = ws.create_project('imx-test')
     proj.add_capture(b'FAKEDNG', 'alsc', 5000)
     proj.add_capture(b'FAKEDNG', 'macbeth', 5858, lux=1344, label='d65')
-    assert proj.counts() == {'macbeth': 1, 'alsc': 1, 'cac': 0}
+    assert proj.counts() == {'macbeth': 1, 'alsc': 1, 'cac': 0, 'dark': 0}
 
     # Filenames are CTT-correct on disk.
     names = sorted(p.name for p in proj.path.glob('*.dng'))
@@ -24,7 +24,7 @@ def test_session_add_and_count(tmp_path):
 
     # Reloading the project from disk restores capture metadata.
     reloaded = ws.get_project('imx-test')
-    assert reloaded.counts() == {'macbeth': 1, 'alsc': 1, 'cac': 0}
+    assert reloaded.counts() == {'macbeth': 1, 'alsc': 1, 'cac': 0, 'dark': 0}
 
 
 def test_recapture_same_name_overwrites_not_duplicates(tmp_path):
@@ -54,23 +54,45 @@ def test_load_heals_duplicate_filenames(tmp_path):
     assert reloaded.counts()['macbeth'] == 1
 
 
-def test_import_capture_auto_tags(tmp_path):
+def test_import_capture_auto_tags_and_renames(tmp_path):
     ws = sessions.Workspace(tmp_path)
     proj = ws.create_project('imx-test')
     mac = proj.import_capture('d65_5000k_800l.dng', b'MAC')
     alsc = proj.import_capture('alsc_3000k_0.dng', b'ALSC')
 
-    assert (mac.image_type, mac.colour_temp, mac.lux, mac.label) == ('macbeth', 5000, 800, 'd65')
+    # Tags come from the uploaded name; the file is renamed to the project's
+    # naming scheme (Macbeth label = project name, canonical type prefixes).
+    assert (mac.image_type, mac.colour_temp, mac.lux, mac.label) == ('macbeth', 5000, 800, 'imx-test')
+    assert mac.filename == 'imxtest_5000k_800l.dng'  # filename uses the sanitised label
     assert (alsc.image_type, alsc.colour_temp, alsc.lux) == ('alsc', 3000, None)
-    # Stored under the original (auto-tagged) filename, bytes preserved.
-    assert (proj.path / 'd65_5000k_800l.dng').read_bytes() == b'MAC'
-    assert proj.counts() == {'macbeth': 1, 'alsc': 1, 'cac': 0}
+    assert alsc.filename == 'alsc_3000k_0.dng'
+    assert (proj.path / 'imxtest_5000k_800l.dng').read_bytes() == b'MAC'
+    assert proj.counts() == {'macbeth': 1, 'alsc': 1, 'cac': 0, 'dark': 0}
+
+
+def test_import_capture_renames_prefixed_files(tmp_path):
+    # Uploads from other tools may prefix the type tags (e.g. a sensor name);
+    # the rename gives them canonical names so burst grouping applies.
+    proj = sessions.Workspace(tmp_path).create_project('p')
+    names = [proj.import_capture(f'imxtest_2227_alsc_6000k_{i}.dng', b'A').filename for i in range(3)]
+    assert names == ['alsc_6000k_0.dng', 'alsc_6000k_1.dng', 'alsc_6000k_2.dng']
+    dark = proj.import_capture('sensorx_dark_7.dng', b'D')
+    assert dark.filename == 'dark_0.dng'
+
+
+def test_import_capture_macbeth_burst_keeps_index(tmp_path):
+    # Burst-frame uploads (trailing _<n>) stay indexed so frames get distinct
+    # names; plain Macbeth names keep the index-free overwrite semantics.
+    proj = sessions.Workspace(tmp_path).create_project('p')
+    burst = [proj.import_capture(f'd65_5000k_800l_{i}.dng', b'M').filename for i in range(2)]
+    assert burst == ['p_5000k_800l_0.dng', 'p_5000k_800l_1.dng']
+    assert proj.import_capture('d65_5000k_800l.dng', b'M').filename == 'p_5000k_800l.dng'
 
 
 def test_import_capture_normalises_extension_case(tmp_path):
     proj = sessions.Workspace(tmp_path).create_project('p')
     cap = proj.import_capture('alsc_5000k_1.DNG', b'X')
-    assert cap.filename == 'alsc_5000k_1.dng'
+    assert cap.filename == 'alsc_5000k_0.dng'
 
 
 def test_import_capture_rejects_untagged(tmp_path):
@@ -96,7 +118,7 @@ def test_upload_route_auto_tags_and_skips(tmp_path):
     r = client.post('/projects/cam/upload', data=data, content_type='multipart/form-data')
     assert r.status_code == 200
     body = r.get_json()
-    assert [a['filename'] for a in body['added']] == ['d65_5000k_800l.dng']
+    assert [a['filename'] for a in body['added']] == ['cam_5000k_800l.dng']
     assert body['added'][0]['colour_temp'] == 5000
     assert [s['filename'] for s in body['skipped']] == ['oops.dng']
     assert body['counts']['macbeth'] == 1

@@ -24,6 +24,7 @@ function saveFlip(hflip, vflip) {
 function detectType(name) {
   if (name.includes('alsc')) return 'alsc';
   if (name.includes('cac')) return 'cac';
+  if (name.includes('dark')) return 'dark';
   return 'macbeth';
 }
 
@@ -135,7 +136,7 @@ function captureApp(cfg) {
     project: cfg.project,
     connected: null,                 // null = unknown until /api/health resolves
     captures: cfg.captures || [],
-    counts: { macbeth: 0, alsc: 0, cac: 0 },
+    counts: { macbeth: 0, alsc: 0, cac: 0, dark: 0 },
     form: { image_type: 'macbeth', colour_temp: 6500, lux: 1000, frames: 1 },
     controls: { exposure: 10000, gain: 1.0, auto_exposure: true, colour_temp: 0, lux: 0, ev: 0 },
     camera: { model: '', resolution: null },
@@ -232,13 +233,13 @@ function captureApp(cfg) {
     lightboxOff() { this.postLightbox({ off: true }); },
 
     updateCounts() {
-      const c = { macbeth: 0, alsc: 0, cac: 0 };
+      const c = { macbeth: 0, alsc: 0, cac: 0, dark: 0 };
       for (const cap of this.captures) c[cap.image_type] = (c[cap.image_type] || 0) + 1;
       this.counts = c;
     },
 
     nextIndex(type, ct) {
-      const prefix = `${type}_${ct}k_`;
+      const prefix = type === 'dark' ? 'dark_' : `${type}_${ct}k_`;
       let max = -1;
       for (const c of this.captures) {
         if (c.filename.startsWith(prefix)) {
@@ -253,6 +254,7 @@ function captureApp(cfg) {
       const ct = this.form.colour_temp || 0;
       if (this.form.image_type === 'alsc') return `alsc_${ct}k_${this.nextIndex('alsc', ct)}.dng`;
       if (this.form.image_type === 'cac') return `cac_${ct}k_${this.nextIndex('cac', ct)}.dng`;
+      if (this.form.image_type === 'dark') return `dark_${this.nextIndex('dark')}.dng`;
       const label = sanitiseLabel(this.project) || 'mac';
       const suffix = (this.form.frames || 1) > 1 ? '_<n>' : '';
       return `${label}_${ct}k_${this.form.lux || 0}l${suffix}.dng`;
@@ -412,12 +414,16 @@ function imagesApp(cfg) {
 
     // Burst frames share a name apart from the trailing index: Macbeth
     // d65_5000k_800l_<n>.dng, and ALSC replicates alsc_<K>k_<n>.dng (which
-    // CTT averages per colour temperature). Group them in the grid.
+    // CTT averages per colour temperature). Group them in the grid; dark
+    // frames (dark_<n>.dng) form a single flat group. Uploads are renamed to
+    // this scheme on import, so the canonical prefixes are exhaustive here.
     groupKey(c) {
       const mac = c.filename.match(/^(.*\dl)_\d+\.dng$/i);
       if (mac) return mac[1];
       const alsc = c.filename.match(/^(alsc_\d+k)_\d+\.dng$/i);
       if (alsc) return alsc[1];
+      const dark = c.filename.match(/^(dark)_\d+\.dng$/i);
+      if (dark) return dark[1];
       return null;
     },
 
@@ -573,10 +579,26 @@ function runApp(cfg) {
     luxMode: 'single',          // 'single' = anchor on nearest-luxAnchor capture; 'average' = robust average
     luxAnchor: 1000,            // anchor lux for single mode
     luxMethod: 'trimmed-mean',  // robust-average method: 'trimmed-mean' | 'median'
+    blSeed: null,               // black level measured from the project's dark frames
+    blFrames: 0,
     running: false,
     done: false,
     exitCode: null,
     source: null,
+
+    async init() {
+      // Seed the black level field from the project's dark frames (if any).
+      // Only an untouched field (-1 auto) is seeded; a user value is kept.
+      try {
+        const r = await fetch(`/projects/${this.project}/blacklevel`);
+        if (!r.ok) return;
+        const d = await r.json();
+        if (d.black_level == null) return;
+        this.blSeed = d.black_level;
+        this.blFrames = (d.frames || []).length;
+        if (this.blacklevel === -1) this.blacklevel = d.black_level;
+      } catch (e) { /* seeding is best-effort */ }
+    },
 
     start() {
       if (this.running) return;
@@ -1009,6 +1031,64 @@ function resultsApp(cfg) {
       try {
         if (this.metrics && this.metrics.lux && (this.metrics.lux.samples || []).length) this.renderLux();
       } catch (e) { console.error('Lux chart:', e); }
+      try {
+        if (this.metrics && this.metrics.black_level && (this.metrics.black_level.frames || []).length
+            && !this.blSinglePoint()) {
+          this.renderBlackLevel();
+        }
+      } catch (e) { console.error('Black level chart:', e); }
+    },
+
+    // All dark frames at a single total exposure: a trend plot is meaningless,
+    // so the card shows the measured per-channel values as stat boxes instead.
+    blSinglePoint() {
+      const f = (this.metrics && this.metrics.black_level && this.metrics.black_level.frames) || [];
+      return f.length > 0 && new Set(f.map((p) => p.total_exposure)).size === 1;
+    },
+
+    blStats() {
+      const bl = (this.metrics && this.metrics.black_level) || {};
+      const f = bl.frames || [];
+      if (!f.length) return [];
+      const avg = (ch) => Math.round(f.reduce((s, p) => s + (p[ch] || 0), 0) / f.length);
+      const out = ('y' in f[0])
+        ? [['Y measured', avg('y')]]
+        : [['R measured', avg('r')], ['G measured', avg('g')], ['B measured', avg('b')]];
+      out.push(['Used', bl.black_level]);
+      return out;
+    },
+
+    renderBlackLevel() {
+      const bl = this.metrics.black_level;
+      const ctx = document.getElementById('blackLevelChart');
+      if (!ctx) return;
+      const pts = bl.frames.slice().sort((a, b) => a.total_exposure - b.total_exposure);
+      const xs = pts.map((p) => p.total_exposure / 1000);  // metrics carry µs; plot in ms
+      // Colour sensors carry r/g/b per frame; mono frames a single y.
+      const series = ('y' in (pts[0] || {}))
+        ? [['y', '#9aa7b8']]
+        : [['r', '#e5484d'], ['g', '#2fb344'], ['b', '#50a0ff']];
+      const opts = chartOpts('Total exposure (ms × gain)', 'Black level (16-bit)');
+      opts.scales.x.type = 'linear';
+      opts.plugins.tooltip = { callbacks: {
+        label: (i) => {
+          const p = pts[i.dataIndex];
+          return i.dataset.label === 'calibration'
+            ? `calibration ${i.parsed.y}`
+            : `${p.name} · ${i.dataset.label} ${i.parsed.y} · ${(p.exposure / 1000).toFixed(2)} ms × ${p.gain}`;
+        },
+      } };
+      const datasets = series.map(([ch, colour]) => ({
+        type: 'scatter', label: ch,
+        data: pts.map((p) => ({ x: p.total_exposure / 1000, y: p[ch] })),
+        backgroundColor: colour, pointRadius: 4,
+      }));
+      datasets.push({
+        type: 'line', label: 'calibration',
+        data: [{ x: Math.min(...xs), y: bl.black_level }, { x: Math.max(...xs), y: bl.black_level }],
+        borderColor: '#9aa7b8', borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0,
+      });
+      this._charts.black_level = new Chart(ctx, { data: { datasets }, options: opts });
     },
 
     renderLux() {

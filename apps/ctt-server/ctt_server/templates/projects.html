@@ -16,13 +16,13 @@
     <div class="card-head"><h2>Your projects</h2></div>
     {% if projects %}
       <table>
-        <thead><tr><th>Name</th><th>Macbeth</th><th>ALSC</th><th>CAC</th><th>Created</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Macbeth</th><th>ALSC</th><th>CAC</th><th>Dark</th><th>Created</th><th></th></tr></thead>
         <tbody>
         {% for p in projects %}
           {% set c = p.counts() %}
           <tr>
             <td class="mono"><a href="{{ url_for('project', name=p.name) }}">{{ p.name }}</a></td>
-            <td>{{ c.macbeth }}</td><td>{{ c.alsc }}</td><td>{{ c.cac }}</td>
+            <td>{{ c.macbeth }}</td><td>{{ c.alsc }}</td><td>{{ c.cac }}</td><td>{{ c.dark }}</td>
             <td class="muted">{{ p.created_at[:10] }}</td>
             <td>
               <form method="post" action="{{ url_for('delete_project', name=p.name) }}"

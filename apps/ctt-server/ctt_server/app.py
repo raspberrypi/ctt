@@ -36,7 +36,7 @@ from .camera import (
     platform_target,
     reload_shared_camera,
 )
-from .naming import NamingError, validate_filename
+from .naming import NamingError, detect_type, validate_filename
 from .sessions import Project, Workspace
 
 logger = logging.getLogger(__name__)
@@ -369,7 +369,8 @@ def create_app(workspace_root: str | None = None) -> Flask:
         body = request.get_json(force=True) or {}
         image_type = body.get('image_type')
         try:
-            colour_temp = int(body.get('colour_temp'))
+            # Dark frames carry no tags; everything else needs a colour temp.
+            colour_temp = None if image_type == 'dark' else int(body.get('colour_temp'))
             lux = int(body['lux']) if body.get('lux') not in (None, '') else None
             label = body.get('label') or None
             frames = max(1, min(int(body.get('frames', 1) or 1), 16))
@@ -449,6 +450,40 @@ def create_app(workspace_root: str | None = None) -> Flask:
         except KeyError:
             abort(404, f'No such capture: {filename}')
         return jsonify({'filename': cap.filename, 'excluded': cap.excluded})
+
+    # Quick black level measurements, cached per (path, mtime) so repeated Run
+    # tab visits don't re-read multi-megabyte DNGs.
+    _blacklevel_cache: dict[str, dict] = {}
+
+    @app.route('/projects/<name>/blacklevel')
+    def project_blacklevel(name: str):
+        """Black level measured from the project's dark frames (seeds the Run tab).
+
+        Uses the same measurement helper as the calibration algorithm, so the
+        seeded value matches what a full run would compute.
+        """
+        from ctt.algorithms.black_level import measure_dark_dng  # noqa: PLC0415 - defer the ctt import
+
+        proj = get_project_or_404(name)
+        excluded = {c.filename for c in proj.captures if c.excluded}
+        frames = []
+        for p in sorted(proj.path.glob('*.dng')):
+            if detect_type(p.name) != 'dark' or p.name in excluded:
+                continue
+            mtime = p.stat().st_mtime
+            cached = _blacklevel_cache.get(str(p))
+            if cached is None or cached['mtime'] != mtime:
+                try:
+                    cached = {'mtime': mtime, 'frame': measure_dark_dng(str(p))}
+                except Exception as err:
+                    logger.warning(f'Black level measurement failed for {p.name}: {err}')
+                    continue
+                _blacklevel_cache[str(p)] = cached
+            frames.append(cached['frame'])
+        if not frames:
+            return jsonify({'black_level': None, 'frames': []})
+        black_level = round(sum(f['black_level'] for f in frames) / len(frames))
+        return jsonify({'black_level': black_level, 'frames': frames})
 
     def _develop_dng(dng: Path, thumb: bool = False) -> Response:
         """Develop a DNG into a preview JPEG with rawpy (won't match the ISP look).

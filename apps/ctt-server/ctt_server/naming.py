@@ -11,6 +11,7 @@
 #   Macbeth chart:    <label>_<K>k_<lux>l.dng    e.g. d65_5858k_1344l.dng
 #   Macbeth burst:    <label>_<K>k_<lux>l_<idx>.dng (frames CTT averages internally)
 #   CAC dot chart:    cac_<K>k_<idx>.dng          e.g. cac_5000k_0.dng
+#   Dark frame:       dark_<idx>.dng              e.g. dark_0.dng (no tags needed)
 #
 # We reuse get_col_lux as the single source of truth: every name we build is
 # validated by round-tripping it back through the exact regex CTT uses.
@@ -19,12 +20,12 @@ import re
 
 from ctt.core.camera import get_col_lux
 
-IMAGE_TYPES = ('macbeth', 'alsc', 'cac')
+IMAGE_TYPES = ('macbeth', 'alsc', 'cac', 'dark')
 
 # Image type is detected by substring in CTT (Camera.add_imgs): a filename
-# containing 'alsc' is ALSC, 'cac' is CAC, otherwise it is treated as Macbeth.
-# A Macbeth label must therefore contain neither substring.
-_RESERVED_SUBSTRINGS = ('alsc', 'cac')
+# containing 'alsc' is ALSC, 'cac' is CAC, 'dark' is a dark frame, otherwise
+# it is treated as Macbeth. A Macbeth label must contain none of these.
+_RESERVED_SUBSTRINGS = ('alsc', 'cac', 'dark')
 
 
 class NamingError(ValueError):
@@ -39,7 +40,7 @@ def sanitise_label(label: str) -> str:
 
 def build_filename(
     image_type: str,
-    colour_temp: int,
+    colour_temp: int | None = None,
     *,
     lux: int | None = None,
     label: str | None = None,
@@ -48,11 +49,17 @@ def build_filename(
     """Build a CTT-compatible .dng filename for the given image type and tags.
 
     Raises NamingError if the tags are inconsistent (e.g. Macbeth without lux,
-    or a label that collides with the alsc/cac type markers), or if the result
-    does not round-trip through CTT's own get_col_lux parser.
+    or a label that collides with the alsc/cac/dark type markers), or if the
+    result does not round-trip through CTT's own get_col_lux parser.
     """
     if image_type not in IMAGE_TYPES:
         raise NamingError(f'Unknown image type: {image_type!r} (expected one of {IMAGE_TYPES})')
+    if image_type == 'dark':
+        # Dark frames carry no tags: the capture conditions (no light) are not
+        # encoded, and CTT reads exposure/gain from the DNG metadata.
+        name = f'dark_{index or 0}.dng'
+        _verify(name, image_type, None, None)
+        return name
     if not isinstance(colour_temp, int) or colour_temp <= 0:
         raise NamingError(f'Colour temperature must be a positive integer Kelvin, got {colour_temp!r}')
 
@@ -81,10 +88,10 @@ def build_filename(
     return name
 
 
-def _verify(name: str, image_type: str, colour_temp: int, lux: int | None) -> None:
+def _verify(name: str, image_type: str, colour_temp: int | None, lux: int | None) -> None:
     """Assert the generated name parses back to the intended tags via CTT's parser."""
     col, parsed_lux = get_col_lux(name)
-    if col != colour_temp:
+    if image_type != 'dark' and col != colour_temp:
         raise NamingError(f'Generated name {name!r} does not encode colour temp {colour_temp} (got {col})')
     if image_type == 'macbeth' and parsed_lux != lux:
         raise NamingError(f'Generated name {name!r} does not encode lux {lux} (got {parsed_lux})')
@@ -99,6 +106,8 @@ def detect_type(filename: str) -> str:
         return 'alsc'
     if 'cac' in filename:
         return 'cac'
+    if 'dark' in filename:
+        return 'dark'
     return 'macbeth'
 
 
@@ -110,6 +119,8 @@ def validate_filename(filename: str) -> tuple[bool, str]:
     if not filename.lower().endswith('.dng'):
         return False, 'Not a .dng file'
     image_type = detect_type(filename)
+    if image_type == 'dark':
+        return True, 'OK'  # dark frames need no tags
     col, lux = get_col_lux(filename)
     if col is None:
         return False, 'No colour temperature in filename (expected e.g. 5000k)'
@@ -118,16 +129,19 @@ def validate_filename(filename: str) -> tuple[bool, str]:
     return True, 'OK'
 
 
-def parse_filename(filename: str) -> tuple[str, int, int | None, str | None]:
+def parse_filename(filename: str) -> tuple[str, int | None, int | None, str | None]:
     """Parse a CTT-format filename into (image_type, colour_temp, lux, label).
 
     Used to auto-tag uploaded images from their filename. Raises NamingError if
-    the name is not a valid CTT calibration filename.
+    the name is not a valid CTT calibration filename. Dark frames have no tags:
+    colour_temp, lux and label are all None.
     """
     ok, msg = validate_filename(filename)
     if not ok:
         raise NamingError(msg)
     image_type = detect_type(filename)
+    if image_type == 'dark':
+        return 'dark', None, None, None
     colour_temp, lux = get_col_lux(filename)
     label = None
     if image_type == 'macbeth':
@@ -139,18 +153,20 @@ def parse_filename(filename: str) -> tuple[str, int, int | None, str | None]:
 def next_index(
     existing: list[str],
     image_type: str,
-    colour_temp: int,
+    colour_temp: int | None = None,
     *,
     lux: int | None = None,
     label: str | None = None,
 ) -> int:
     """Return the next free replicate index for a name with these tags.
 
-    ALSC/CAC names are always indexed; Macbeth names only in burst mode, where
-    the prefix includes the label and lux (e.g. d65_5000k_800l_).
+    ALSC/CAC/dark names are always indexed; Macbeth names only in burst mode,
+    where the prefix includes the label and lux (e.g. d65_5000k_800l_).
     """
     if image_type == 'macbeth':
         prefix = f'{sanitise_label(label or "mac")}_{colour_temp}k_{lux}l_'
+    elif image_type == 'dark':
+        prefix = 'dark_'
     else:
         prefix = f'{image_type}_{colour_temp}k_'
     used = []
