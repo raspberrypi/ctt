@@ -52,8 +52,8 @@ h3 { font-size: 0.95rem; color: var(--text-dim); text-transform: uppercase; lett
   align-items: center;
   gap: 16px;
   padding: 12px 24px;
-  background: linear-gradient(180deg, var(--bg-2), var(--bg));
-  border-bottom: 1px solid var(--border);
+  background: var(--accent);
+  border-bottom: 1px solid rgb(160, 24, 64);
   position: sticky;
   top: 0;
   z-index: 50;
@@ -65,27 +65,41 @@ h3 { font-size: 0.95rem; color: var(--text-dim); text-transform: uppercase; lett
   font-weight: 700;
   letter-spacing: -0.02em;
   font-size: 1.05rem;
-  color: var(--text);
+  color: #fff;
+  padding: 5px 10px;
+  margin-left: -10px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
 }
-.brand .dot {
-  width: 12px; height: 12px; border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, var(--accent-2), var(--accent));
-  box-shadow: 0 0 12px var(--accent-soft);
+.brand:hover { background: rgba(255, 255, 255, 0.14); text-decoration: none; }
+.brand .logo {
+  height: 26px;
+  width: auto;
+  /* render the red logo white so it stands out on the red bar */
+  filter: brightness(0) invert(1);
 }
-.brand small { color: var(--text-faint); font-weight: 500; }
+.brand small { color: rgba(255, 255, 255, 0.75); font-weight: 500; }
 .topbar nav { display: flex; gap: 4px; margin-left: 12px; }
 .topbar nav a {
-  color: var(--text-dim); padding: 6px 12px; border-radius: var(--radius-sm);
+  color: rgba(255, 255, 255, 0.85); padding: 6px 12px; border-radius: var(--radius-sm);
   font-weight: 550; font-size: 0.9rem;
 }
-.topbar nav a:hover { background: var(--panel); color: var(--text); text-decoration: none; }
-.topbar nav a.active { background: var(--accent-soft); color: var(--accent-2); }
+.topbar nav a:hover { background: rgba(255, 255, 255, 0.14); color: #fff; text-decoration: none; }
+.topbar nav a.active { background: rgba(255, 255, 255, 0.2); color: #fff; }
 .topbar .spacer { flex: 1; }
+
+/* --- intro / landing page --- */
+.intro { max-width: 760px; margin: 40px auto; text-align: center; }
+.intro-logo { height: 72px; margin-bottom: 16px; }
+.intro .sub { color: var(--text-dim); margin: 0 auto 28px; max-width: 560px; }
+.intro-steps { text-align: left; margin-bottom: 28px; }
+.intro-steps ol { margin: 0; padding-left: 22px; display: grid; gap: 10px; }
 
 .status-chip {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 5px 12px; border-radius: 999px; font-size: 0.82rem;
-  background: var(--panel); border: 1px solid var(--border); color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.25);
+  color: rgba(255, 255, 255, 0.85);
 }
 .status-chip .led { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
 .status-chip.online .led { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
@@ -97,8 +111,17 @@ h3 { font-size: 0.95rem; color: var(--text-dim); text-transform: uppercase; lett
 .page-head .sub { color: var(--text-dim); font-size: 0.9rem; }
 
 /* --- project tab bar --- */
-.proj-head { margin-bottom: 12px; }
-.proj-head h1 { margin: 0; }
+/* project name, centred on the title bar */
+.topbar .proj-name {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #fff;
+  font-weight: 650;
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+@media (max-width: 900px) { .topbar .proj-name { display: none; } }
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
 .tabs a { padding: 10px 16px; margin-bottom: -1px; font-weight: 600; font-size: 0.9rem;
   color: var(--text-dim); border-bottom: 2px solid transparent; }

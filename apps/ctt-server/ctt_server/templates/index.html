@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Raspberry Pi Camera Tuning Tool{% endblock %}
+{% block body %}
+<div class="intro">
+  <img src="{{ url_for('static', filename='rpi-logo-colour.svg') }}" alt="" class="intro-logo">
+  <h1>Raspberry Pi Camera Tuning Tool</h1>
+  <p class="sub">A web front end for creating libcamera tuning files for Raspberry Pi camera
+    sensors.</p>
+
+  <div class="card intro-steps">
+    <h2>How it works</h2>
+    <ol>
+      <li><strong>Create a project</strong> — one per sensor or camera module, from the
+        <a href="{{ url_for('projects') }}">Projects</a> page.</li>
+      <li><strong>Capture calibration images</strong> — Macbeth chart images across a range of
+        colour temperatures and lux levels, flat-field images for lens shading (ALSC), and dark
+        frames for black level. Use the <em>Capture</em> tab with a connected camera, or upload
+        existing DNGs on the <em>Images</em> tab.</li>
+      <li><strong>Run CTT</strong> — generate a tuning file from the captured images.</li>
+      <li><strong>Inspect and refine</strong> — review the generated parameters on the
+        <em>Results</em> tab, and hand-edit values on the <em>Tuning</em> tab.</li>
+      <li><strong>Preview</strong> — capture live images with the new tuning applied and compare
+        against the current default.</li>
+      <li><strong>MTF</strong> — optionally measure lens sharpness with a slanted-edge target;
+        this is independent of the tuning run.</li>
+    </ol>
+  </div>
+
+  <a class="btn primary" href="{{ url_for('projects') }}">Get started — go to Projects</a>
+</div>
+{% endblock %}

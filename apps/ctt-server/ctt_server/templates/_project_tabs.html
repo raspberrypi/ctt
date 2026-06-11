@@ -1,5 +1,4 @@
 {# Project-level tab navigation. Pages set `active_tab` before including. #}
-<div class="proj-head"><h1>{{ project.name }}</h1></div>
 <nav class="tabs">
   <a href="{{ url_for('project', name=project.name) }}" class="{{ 'active' if active_tab == 'capture' }}">Capture</a>
   <a href="{{ url_for('images_page', name=project.name) }}" class="{{ 'active' if active_tab == 'images' }}">Images</a>

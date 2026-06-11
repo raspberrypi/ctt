@@ -192,7 +192,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
     # --- pages -------------------------------------------------------------
     @app.route('/')
     def index():
-        return redirect(url_for('projects'))
+        return render_template('index.html')
 
     @app.route('/projects')
     def projects():
