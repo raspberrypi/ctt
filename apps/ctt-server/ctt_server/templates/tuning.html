@@ -23,6 +23,8 @@
     <div class="banner info mt" x-show="runsMismatch()" x-cloak>⚠ PiSP and VC4 were generated at different times — re-run to refresh both.</div>
     <div class="btn-row">
       <a class="btn primary" :href="'/projects/{{ project.name }}/download/json/'+target">⬇ Download JSON</a>
+      <a class="btn" x-show="tuningState.custom !== null" x-cloak
+         :href="'/projects/{{ project.name }}/download/custom/'+target">⬇ Download custom JSON</a>
       <a class="btn" :href="'/projects/{{ project.name }}/download/log/'+target">⬇ Download log</a>
       <a class="btn ghost" href="{{ url_for('download_archive', name=project.name) }}">⬇ Download project (.zip)</a>
     </div>
@@ -32,10 +34,44 @@
   <div class="card mt">
     <div class="card-head">
       <h2>File contents</h2>
+      <div style="display:flex; gap:10px; align-items:center">
+        <div class="seg compact" x-show="tuningState.custom !== null && !editing" x-cloak>
+          <button type="button" :class="{active: tuningView==='original'}" @click="setTuningView('original')">Original</button>
+          <button type="button" :class="{active: tuningView==='custom'}" @click="setTuningView('custom')">Custom</button>
+        </div>
+        <button type="button" class="btn sm" x-show="!editing" @click="startEdit()">✎ Edit</button>
+        <button type="button" class="btn sm ghost" x-show="tuningState.custom !== null && !editing" x-cloak
+                @click="revertCustom()">Revert</button>
+        <span class="muted" x-text="target.toUpperCase()"></span>
+      </div>
+    </div>
+    <div class="banner error mt" x-show="tuningError" x-text="tuningError" x-cloak></div>
+    <template x-if="!editing">
+      {# x-html is safe here: highlightJson escapes the text before adding its own spans #}
+      <pre class="json-view" x-html="tuningHtml || 'Loading…'"></pre>
+    </template>
+    <template x-if="editing">
+      <div>
+        <textarea class="json-edit" x-model="editorText" spellcheck="false"></textarea>
+        <div class="btn-row mt">
+          <button type="button" class="btn primary" @click="saveEdit()">Save custom tuning</button>
+          <button type="button" class="btn ghost" @click="editing=false; tuningError=''">Cancel</button>
+        </div>
+        <p class="hint">Saved as <code x-text="'{{ project.name }}_' + target + '_custom.json'"></code> alongside the
+          generated original (which is never modified). Custom edits are discarded when CTT regenerates this
+          target's tuning, and can be previewed live from the Preview tab.</p>
+      </div>
+    </template>
+  </div>
+
+  <!-- Diff of the custom edits against the generated original -->
+  <div class="card mt" x-show="tuningState.diff" x-cloak>
+    <div class="card-head">
+      <h2>Custom edits diff</h2>
       <span class="muted" x-text="target.toUpperCase()"></span>
     </div>
-    {# x-html is safe here: highlightJson escapes the text before adding its own spans #}
-    <pre class="json-view" x-html="tuningHtml || 'Loading…'"></pre>
+    <pre class="diff-view" x-html="diffHtml"></pre>
+    <p class="hint">Unified diff of the custom file against the generated original.</p>
   </div>
 </div>
 {% endif %}

@@ -37,6 +37,19 @@ function highlightJson(text) {
   );
 }
 
+// Colour a unified diff by line prefix (file headers, @@ hunks, +/- lines).
+function highlightDiff(text) {
+  const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return esc.split('\n').map((ln) => {
+    let cls = '';
+    if (ln.startsWith('+++') || ln.startsWith('---')) cls = 'd-file';
+    else if (ln.startsWith('@@')) cls = 'd-hunk';
+    else if (ln.startsWith('+')) cls = 'd-add';
+    else if (ln.startsWith('-')) cls = 'd-del';
+    return cls ? `<span class="${cls}">${ln}</span>` : ln;
+  }).join('\n');
+}
+
 function detectType(name) {
   if (name.includes('alsc')) return 'alsc';
   if (name.includes('cac')) return 'cac';
@@ -717,7 +730,15 @@ function resultsApp(cfg) {
     alscHover: null,             // {col,row,r,g,b} gains under the cursor on the ALSC grid
     runs: cfg.runs || {}, // target -> {label, epoch}: when each tuning file was generated
     autoPreview: cfg.autoPreview || false,  // Preview page: start the live test on load
-    tuningHtml: '',       // Tuning page: the selected target's JSON, syntax-highlighted
+    customs: cfg.customs || {},  // Preview page: target -> custom tuning file exists
+    // Tuning page: original/custom file text + diff, viewer/editor state.
+    tuningState: { original: null, custom: null, diff: null },
+    tuningView: 'custom', // which text the contents box shows when a custom exists
+    tuningHtml: '',       // highlighted text of the selected view
+    diffHtml: '',
+    editing: false,
+    editorText: '',
+    tuningError: '',
     _charts: {},
     // live preview test
     busy: false,
@@ -798,13 +819,16 @@ function resultsApp(cfg) {
       this.$nextTick(() => requestAnimationFrame(() => { try { this.renderAlsc(); } catch (e) { console.error(e); } }));
     },
 
-    async startPreviewTest() {
+    async startPreviewTest(kind = 'generated') {
       this.busy = true; this.testError = '';
       try {
-        const r = await fetch(`/projects/${this.project}/preview-test`, { method: 'POST' });
+        const r = await fetch(`/projects/${this.project}/preview-test`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind }),
+        });
         const d = await r.json();
         if (!r.ok) { this.testError = d.error || 'Failed to start preview'; return; }
-        this.testTarget = d.target; this.testTuning = d.tuning; this.testKind = 'generated';
+        this.testTarget = d.target; this.testTuning = d.tuning; this.testKind = d.kind || 'generated';
         this.testing = true;
         // Cache-bust so the <img> opens a fresh MJPEG stream on the new camera.
         this.previewSrc = '/api/preview?t=' + Date.now();
@@ -990,7 +1014,7 @@ function resultsApp(cfg) {
       const ctx = document.getElementById('liveDeChart');
       const d = this.colour;
       if (!ctx || !d) return;
-      const label = `ΔE · ${this.testKind === 'standard' ? 'existing' : 'tuned'}`;
+      const label = `ΔE · ${{ standard: 'existing', custom: 'custom' }[this.testKind] || 'tuned'}`;
       const chart = this._charts.livede;
       if (chart) {
         // Update in place: a destroy/recreate every poll would flicker.
@@ -1050,7 +1074,7 @@ function resultsApp(cfg) {
 
     async select(t) {
       this.target = t;
-      if (cfg.showJson) this.loadTuningText(t);
+      if (cfg.showJson) this.loadTuningData(t);
       const r = await fetch(`/projects/${this.project}/results/data?target=${t}`);
       if (!r.ok) return;
       const data = await r.json();
@@ -1066,14 +1090,56 @@ function resultsApp(cfg) {
       this.$nextTick(() => requestAnimationFrame(() => this.renderCharts()));
     },
 
-    // Tuning page: fetch the selected target's tuning JSON for the contents box.
-    async loadTuningText(t) {
-      this.tuningHtml = '';
+    // Tuning page: fetch the selected target's original/custom text + diff.
+    async loadTuningData(t) {
+      this.tuningHtml = ''; this.diffHtml = ''; this.editing = false; this.tuningError = '';
       try {
-        const r = await fetch(`/projects/${this.project}/download/json/${t}`);
-        const text = r.ok ? await r.text() : '';
-        if (this.target === t) this.tuningHtml = highlightJson(text);  // ignore a stale fetch after a quick re-switch
+        const r = await fetch(`/projects/${this.project}/tuning-data/${t}`);
+        if (!r.ok) return;
+        const s = await r.json();
+        if (this.target !== t) return;  // ignore a stale fetch after a quick re-switch
+        this.tuningState = s;
+        this.tuningView = s.custom !== null ? 'custom' : 'original';
+        this.renderTuning();
       } catch (e) { /* box stays empty */ }
+    },
+
+    renderTuning() {
+      const s = this.tuningState;
+      const text = (this.tuningView === 'custom' && s.custom !== null) ? s.custom : (s.original || '');
+      this.tuningHtml = highlightJson(text);
+      this.diffHtml = s.diff ? highlightDiff(s.diff) : '';
+    },
+
+    setTuningView(v) { this.tuningView = v; this.renderTuning(); },
+
+    startEdit() {
+      this.editorText = this.tuningState.custom ?? this.tuningState.original ?? '';
+      this.editing = true; this.tuningError = '';
+    },
+
+    async saveEdit() {
+      try {
+        const r = await fetch(`/projects/${this.project}/tuning/custom/${this.target}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ json: this.editorText }),
+        });
+        const d = await r.json();
+        if (!r.ok) { this.tuningError = d.error || 'Save failed'; return; }
+        this.tuningState = d; this.tuningView = 'custom'; this.editing = false; this.tuningError = '';
+        this.renderTuning();
+      } catch (e) { this.tuningError = 'Save request failed'; }
+    },
+
+    async revertCustom() {
+      if (!confirm('Discard the custom edits and revert to the original tuning?')) return;
+      try {
+        const r = await fetch(`/projects/${this.project}/tuning/custom/${this.target}/delete`, { method: 'POST' });
+        if (!r.ok) return;
+        this.tuningState = await r.json();
+        this.tuningView = 'original'; this.editing = false;
+        this.renderTuning();
+      } catch (e) { /* keep the current view */ }
     },
 
     // The selected CT's per-patch entry, and its mean/worst ΔE for the stat row.

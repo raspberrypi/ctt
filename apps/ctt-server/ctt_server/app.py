@@ -7,6 +7,7 @@
 # Everything runs in one process (on the Pi). The remote client is just a
 # browser. Captures use Picamera2 directly; the tuner runs as a subprocess.
 
+import difflib
 import json
 import logging
 from datetime import datetime
@@ -289,24 +290,34 @@ def create_app(workspace_root: str | None = None) -> Flask:
     # --- live preview test (load a generated tuning into the camera) -------
     @app.route('/projects/<name>/preview-test', methods=['POST'])
     def preview_test(name: str):
-        """Restart the camera with this project's generated tuning for live preview."""
+        """Restart the camera with this project's generated (or custom) tuning for live preview."""
         proj = get_project_or_404(name)
+        kind = (request.get_json(silent=True) or {}).get('kind', 'generated')
         target = platform_target()
         if target is None:
             return jsonify({'error': 'Could not determine the camera ISP platform.'}), 503
-        json_path = proj.output_dir / f'{proj.name}_{target}.json'
-        if not json_path.exists():
-            return jsonify(
-                {
-                    'error': f'No {target.upper()} tuning for this project — this Pi runs {target.upper()}. '
-                    f'Re-run CTT for {target}.'
-                }
-            ), 400
+        if kind == 'custom':
+            json_path = proj.output_dir / f'{proj.name}_{target}_custom.json'
+            if not json_path.exists():
+                return jsonify(
+                    {'error': f'No custom tuning edits for {target.upper()} — save edits on the Tuning tab first.'}
+                ), 400
+        else:
+            json_path = proj.output_dir / f'{proj.name}_{target}.json'
+            if not json_path.exists():
+                return jsonify(
+                    {
+                        'error': f'No {target.upper()} tuning for this project — this Pi runs {target.upper()}. '
+                        f'Re-run CTT for {target}.'
+                    }
+                ), 400
         try:
-            cam = reload_shared_camera(tuning_file=str(json_path), preview_max_width=1920)
+            # Hand-edited tunings are canary-tested in a subprocess first: a bad
+            # one would otherwise wedge this process's camera until a restart.
+            cam = reload_shared_camera(tuning_file=str(json_path), preview_max_width=1920, validate=(kind == 'custom'))
         except CameraError as err:
             return jsonify({'error': str(err)}), 503
-        return jsonify({'target': target, 'tuning': json_path.name, 'model': cam.model})
+        return jsonify({'target': target, 'tuning': json_path.name, 'kind': kind, 'model': cam.model})
 
     @app.route('/api/preview-default', methods=['POST'])
     def api_preview_default():
@@ -600,7 +611,10 @@ def create_app(workspace_root: str | None = None) -> Flask:
         proj = get_project_or_404(name)
         files = ctt_runner.output_files(proj, ['pisp', 'vc4'])
         available = {t: f for t, f in files.items() if f['json']}
-        return render_template('preview.html', project=proj, files=available, runs=_run_info(available))
+        customs = {t: _custom_tuning_path(proj, t).exists() for t in available}
+        return render_template(
+            'preview.html', project=proj, files=available, runs=_run_info(available), customs=customs
+        )
 
     # --- MTF (slanted-edge) --------------------------------------------------
     # Chart captures live in <project>/mtf/, which CTT runs never see (they only
@@ -699,12 +713,69 @@ def create_app(workspace_root: str | None = None) -> Flask:
     @app.route('/projects/<name>/download/<kind>/<target>')
     def download(name: str, kind: str, target: str):
         proj = get_project_or_404(name)
-        suffix = {'json': '.json', 'log': '.log'}.get(kind)
+        suffix = {'json': '.json', 'log': '.log', 'custom': '_custom.json'}.get(kind)
         if suffix is None:
             abort(404)
         path = proj.output_dir / f'{proj.name}_{target}{suffix}'
         if not path.exists():
             abort(404)
         return send_file(path, as_attachment=True, download_name=path.name)
+
+    # --- custom (hand-edited) tuning files ----------------------------------
+    def _custom_tuning_path(proj: Project, target: str) -> Path:
+        return proj.output_dir / f'{proj.name}_{target}_custom.json'
+
+    def _tuning_state(proj: Project, target: str) -> dict:
+        """Original + custom tuning text for a target, with a unified diff."""
+        if target not in ctt_runner.VALID_TARGETS:
+            abort(404)
+        json_path = proj.output_dir / f'{proj.name}_{target}.json'
+        if not json_path.exists():
+            abort(404, 'No tuning file for that target')
+        original = json_path.read_text()
+        custom_path = _custom_tuning_path(proj, target)
+        custom = custom_path.read_text() if custom_path.exists() else None
+        diff = None
+        if custom is not None:
+            diff = '\n'.join(
+                difflib.unified_diff(
+                    original.splitlines(),
+                    custom.splitlines(),
+                    fromfile=json_path.name,
+                    tofile=custom_path.name,
+                    lineterm='',
+                )
+            )
+        return {'original': original, 'custom': custom, 'diff': diff}
+
+    @app.route('/projects/<name>/tuning-data/<target>')
+    def tuning_data(name: str, target: str):
+        """The Tuning tab's contents: original + custom text and their diff."""
+        proj = get_project_or_404(name)
+        return jsonify(_tuning_state(proj, target))
+
+    @app.route('/projects/<name>/tuning/custom/<target>', methods=['POST'])
+    def save_custom_tuning(name: str, target: str):
+        """Save hand edits as the per-target custom tuning file (validated JSON)."""
+        proj = get_project_or_404(name)
+        if target not in ctt_runner.VALID_TARGETS:
+            abort(404)
+        text = (request.get_json(force=True) or {}).get('json', '')
+        try:
+            json.loads(text)
+        except json.JSONDecodeError as err:
+            return jsonify({'error': f'Invalid JSON: {err}'}), 400
+        proj.output_dir.mkdir(parents=True, exist_ok=True)
+        _custom_tuning_path(proj, target).write_text(text)
+        return jsonify(_tuning_state(proj, target))
+
+    @app.route('/projects/<name>/tuning/custom/<target>/delete', methods=['POST'])
+    def delete_custom_tuning(name: str, target: str):
+        """Revert to the original tuning: remove the custom file."""
+        proj = get_project_or_404(name)
+        if target not in ctt_runner.VALID_TARGETS:
+            abort(404)
+        _custom_tuning_path(proj, target).unlink(missing_ok=True)
+        return jsonify(_tuning_state(proj, target))
 
     return app

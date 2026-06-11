@@ -8,13 +8,15 @@
   <div class="card"><div class="empty"><div class="big">📄</div>No tuning files yet.
     <a href="{{ url_for('run_page', name=project.name) }}">Run CTT</a> to generate a tuning to preview.</div></div>
 {% else %}
-<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, runs: {{ runs|tojson }}, autoPreview: true })' x-init="init()">
+<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, runs: {{ runs|tojson }}, customs: {{ customs|tojson }}, autoPreview: true })' x-init="init()">
   <!-- Live preview test -->
   <div class="card">
     <div class="card-head">
       <h2>Live preview test</h2>
       <div class="seg" x-show="testing" x-cloak>
         <button type="button" :class="{active: testKind==='generated'}" @click="startPreviewTest()" :disabled="busy">Tuned</button>
+        <button type="button" :class="{active: testKind==='custom'}" @click="startPreviewTest('custom')" :disabled="busy"
+                x-show="customs[testTarget]" x-cloak>Custom</button>
         <button type="button" :class="{active: testKind==='standard'}" @click="previewStandard()" :disabled="busy">Existing</button>
       </div>
     </div>

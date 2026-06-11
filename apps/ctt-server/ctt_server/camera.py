@@ -9,8 +9,11 @@
 # imported lazily so the package can still be imported (and the tuner run) on
 # machines without a camera, e.g. a desktop for development.
 
+import contextlib
 import logging
 import os
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -74,30 +77,38 @@ class Picamera2Camera:
             self._picam2 = Picamera2(tuning=tuning)
         else:
             self._picam2 = Picamera2()
-        self.model = self._picam2.camera_properties.get('Model', 'unknown')
-        # Full-resolution raw stream (full sensor field of view) → full-res DNGs.
-        # Pick the largest available raw sensor mode (the full readout), rather than
-        # sensor_resolution, since the pixel-array size isn't always a usable mode.
-        # Reading sensor_modes probes every mode, so cache the result per model and
-        # reuse it when the camera is reopened (e.g. a tuning reload).
-        raw_size = _RAW_SIZE_CACHE.get(self.model)
-        if raw_size is None:
-            largest = max(self._picam2.sensor_modes, key=lambda m: m['size'][0] * m['size'][1])['size']
-            raw_size = (int(largest[0]), int(largest[1]))
-            _RAW_SIZE_CACHE[self.model] = raw_size
-        sensor_w, sensor_h = raw_size
-        self.resolution = (sensor_w, sensor_h)
-        self._raw_size = raw_size
-        # Preview derived from the full-res frame, scaled down preserving aspect.
-        prev_w = min(preview_max_width, sensor_w) & ~1
-        prev_h = int(round(prev_w * sensor_h / sensor_w)) & ~1
-        self._preview_size = (prev_w, prev_h)
-        # Sensor flip (applied at configure time via a libcamera Transform); affects
-        # both the live preview and the captured raw/DNG/PNG.
-        self._hflip = False
-        self._vflip = False
-        self._picam2.configure(self._video_config())
-        self._picam2.start()
+        try:
+            self.model = self._picam2.camera_properties.get('Model', 'unknown')
+            # Full-resolution raw stream (full sensor field of view) → full-res DNGs.
+            # Pick the largest available raw sensor mode (the full readout), rather than
+            # sensor_resolution, since the pixel-array size isn't always a usable mode.
+            # Reading sensor_modes probes every mode, so cache the result per model and
+            # reuse it when the camera is reopened (e.g. a tuning reload).
+            raw_size = _RAW_SIZE_CACHE.get(self.model)
+            if raw_size is None:
+                largest = max(self._picam2.sensor_modes, key=lambda m: m['size'][0] * m['size'][1])['size']
+                raw_size = (int(largest[0]), int(largest[1]))
+                _RAW_SIZE_CACHE[self.model] = raw_size
+            sensor_w, sensor_h = raw_size
+            self.resolution = (sensor_w, sensor_h)
+            self._raw_size = raw_size
+            # Preview derived from the full-res frame, scaled down preserving aspect.
+            prev_w = min(preview_max_width, sensor_w) & ~1
+            prev_h = int(round(prev_w * sensor_h / sensor_w)) & ~1
+            self._preview_size = (prev_w, prev_h)
+            # Sensor flip (applied at configure time via a libcamera Transform); affects
+            # both the live preview and the captured raw/DNG/PNG.
+            self._hflip = False
+            self._vflip = False
+            self._picam2.configure(self._video_config())
+            self._picam2.start()
+        except Exception:
+            # A failed bring-up (e.g. a bad custom tuning rejected by libcamera)
+            # must release the device, or the process holds the camera acquired
+            # and every reopen fails until a restart.
+            with contextlib.suppress(Exception):
+                self._picam2.close()
+            raise
         # Allow auto-exposure to settle before the first frame.
         time.sleep(0.5)
 
@@ -449,16 +460,65 @@ def get_shared_camera() -> Picamera2Camera:
     global _SHARED
     with _SHARED_LOCK:
         if _SHARED is None:
-            _SHARED = Picamera2Camera()
+            try:
+                _SHARED = Picamera2Camera()
+            except CameraError:
+                raise
+            except Exception as err:
+                raise CameraError(f'Failed to start the camera: {err}') from err
         return _SHARED
 
 
-def reload_shared_camera(tuning_file: str | None = None, preview_max_width: int = 1920) -> Picamera2Camera:
+def validate_tuning_file(path: str, timeout: float = 60.0) -> None:
+    """Test-load a tuning file by bringing the camera up in a throwaway subprocess.
+
+    A tuning the IPA rejects doesn't just fail the open: libcamera drops the
+    camera from the process-global camera manager, which cannot be recreated,
+    leaving this process camera-less until a restart. Hand-edited tunings are
+    therefore brought up in a sacrificial subprocess first, so the main process
+    only ever loads files known to work. The camera must be closed in this
+    process while the canary runs. Raises CameraError when the tuning is bad.
+    """
+    script = (
+        'import os, sys\n'
+        'from picamera2 import Picamera2\n'
+        'path = sys.argv[1]\n'
+        'tuning = Picamera2.load_tuning_file(os.path.basename(path), dir=os.path.dirname(path))\n'
+        'cam = Picamera2(tuning=tuning)\n'
+        'cam.configure(cam.create_video_configuration())\n'
+        'cam.start()\n'
+        'cam.stop()\n'
+        'cam.close()\n'
+    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, '-c', script, str(path)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as err:
+        raise CameraError(f'Tuning validation timed out for {os.path.basename(path)}') from err
+    if proc.returncode != 0:
+        # Prefer libcamera's ERROR lines (the actual complaint) over the tail
+        # of the python traceback.
+        lines = [ln for ln in f'{proc.stderr}\n{proc.stdout}'.splitlines() if ln.strip()]
+        errors = [ln for ln in lines if 'ERROR' in ln]
+        detail = (errors or lines)[-1] if (errors or lines) else f'exit code {proc.returncode}'
+        raise CameraError(f'Tuning {os.path.basename(path)} failed to load: {detail}')
+
+
+def reload_shared_camera(
+    tuning_file: str | None = None, preview_max_width: int = 1920, validate: bool = False
+) -> Picamera2Camera:
     """Restart the shared camera with a given tuning file (None = default tuning).
 
     Only one Picamera2 can be open per process, so the current instance is closed
     first. A no-op when the camera already runs the requested tuning, which keeps the
-    capture page's "restore default" call cheap.
+    capture page's "restore default" call cheap. validate=True canary-tests the
+    tuning in a subprocess first (see validate_tuning_file) — use it for any
+    tuning that isn't known-good, e.g. hand-edited custom files.
     """
     global _SHARED
     with _SHARED_LOCK:
@@ -467,7 +527,20 @@ def reload_shared_camera(tuning_file: str | None = None, preview_max_width: int 
         if _SHARED is not None:
             _SHARED.close()
             _SHARED = None
-        _SHARED = Picamera2Camera(preview_max_width=preview_max_width, tuning_file=tuning_file)
+        try:
+            if validate and tuning_file is not None:
+                validate_tuning_file(tuning_file)
+            _SHARED = Picamera2Camera(preview_max_width=preview_max_width, tuning_file=tuning_file)
+        except Exception as err:
+            # The requested tuning failed to load: reopen with the default
+            # tuning so the camera isn't left dead, then report.
+            if tuning_file is not None:
+                with contextlib.suppress(Exception):
+                    _SHARED = Picamera2Camera(preview_max_width=preview_max_width)
+            if isinstance(err, CameraError):
+                raise
+            tuning_name = os.path.basename(tuning_file) if tuning_file else 'the default tuning'
+            raise CameraError(f'Failed to start the camera with {tuning_name}: {err}') from err
         return _SHARED
 
 
