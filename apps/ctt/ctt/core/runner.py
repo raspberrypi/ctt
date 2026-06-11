@@ -15,6 +15,7 @@ from pathlib import Path
 
 from ..algorithms.alsc import AlscCalibration
 from ..algorithms.awb import AwbCalibration
+from ..algorithms.black_level import BlackLevelCalibration
 from ..algorithms.cac import CacCalibration
 from ..algorithms.ccm import CcmCalibration
 from ..algorithms.geq import GeqCalibration
@@ -76,6 +77,7 @@ def run_ctt(
     target: str,
     alsc_only: bool = False,
     colour_only: bool = False,
+    black_level_only: bool = False,
     output_json_path: str | None = None,
     plot_cli: list[str] | None = None,
     images: list[str] | None = None,
@@ -152,9 +154,18 @@ def run_ctt(
     if directory[-1] != '/':
         directory += '/'
 
+    def _mode_label() -> str:
+        if alsc_only:
+            return 'ALSC only'
+        if colour_only:
+            return 'AWB + CCM only'
+        if black_level_only:
+            return 'Black level only'
+        return 'Full'
+
     # Print config/options summary at start (Run vs Options, stable layout)
     config_src = 'default' if config is None or config is True or config is False else config
-    mode = 'ALSC only' if alsc_only else ('AWB + CCM only' if colour_only else 'Full')
+    mode = _mode_label()
     disable_str = ', '.join(sorted(disable)) if disable else '(none)'
     plot_str = ', '.join(plot) if plot else '(none)'
     summary_lines = [
@@ -181,13 +192,27 @@ def run_ctt(
         cam.output_dir = output_dir
         cam.log_user_input(json_output, directory, config, log_output)
         cam.add_imgs(directory, mac_config, blacklevel, images=images)
-        # Infer ALSC-only when only ALSC images present (e.g. mono LSC-only from DNGs).
+        # Infer ALSC-only when only ALSC images present (e.g. mono LSC-only from DNGs),
+        # and black-level-only when the directory holds nothing but dark frames.
         if len(cam.imgs) == 0 and len(cam.imgs_cac) == 0 and len(cam.imgs_alsc) > 0:
             alsc_only = True
+        elif len(cam.imgs) == 0 and len(cam.imgs_cac) == 0 and len(cam.imgs_alsc) == 0 and len(cam.imgs_dark) > 0:
+            black_level_only = True
+        if black_level_only and len(cam.imgs_dark) == 0:
+            raise ArgError('\n\nError: Black level only mode requires dark frames (dark_<n>.dng)')
+        keep = None
         if alsc_only:
-            disable = set(cam.json.keys()).symmetric_difference({'rpi.alsc'})
+            keep = {'rpi.alsc'}
         elif colour_only:
-            disable = set(cam.json.keys()).symmetric_difference({'rpi.awb', 'rpi.ccm'})
+            keep = {'rpi.awb', 'rpi.ccm'}
+        elif black_level_only:
+            keep = {'rpi.black_level'}
+        if keep is not None:
+            if cam.imgs_dark:
+                # Dark frames make the black level measurable, and the measured
+                # value feeds the kept algorithms; keep it enabled in any mode.
+                keep |= {'rpi.black_level'}
+            disable = set(cam.json.keys()) - keep
         cam.disable = disable
         cam.plot = plot
     except FileNotFoundError as err:
@@ -197,7 +222,7 @@ def run_ctt(
     # Note: default_template not needed as json_template is already loaded
     platform = PlatformConfig(target, grid_size, None)
 
-    if cam.check_imgs(macbeth=not alsc_only):
+    if cam.check_imgs(macbeth=not (alsc_only or black_level_only)):
         # Mono (greyscale) sensors: disable AWB and CCM in output; they are not applicable.
         if cam.mono:
             logger.info('Mono sensor: disabling AWB and CCM in output.')
@@ -209,9 +234,10 @@ def run_ctt(
         logger.info(f'Black level: {cam.blacklevel_16} ({bl_source})')
         if not alsc_only:
             cam.json['rpi.black_level']['black_level'] = cam.blacklevel_16
-        # When updating a file in-place with --alsc-only or --colour-only, keep all
-        # other algorithm sections unchanged; only skip removing them from the output.
-        if not (output_json_path and (alsc_only or colour_only)):
+        # When updating a file in-place with --alsc-only, --colour-only or
+        # --blacklevel-only, keep all other algorithm sections unchanged; only
+        # skip removing them from the output.
+        if not (output_json_path and (alsc_only or colour_only or black_level_only)):
             cam.json_remove(disable)
         logger.info('\nStarting calibrations')
         # Locate the sensor's built-in tuning for this ISP, so CCM can also report
@@ -220,6 +246,9 @@ def run_ctt(
         if default_path:
             cam.metrics['default_tuning_path'] = default_path
         algorithms = [
+            # First: the measured black level must be in place before anything
+            # downstream consumes blacklevel_16.
+            BlackLevelCalibration(cam, platform, blacklevel),
             AlscCalibration(cam, platform, luminance_strength, do_alsc_colour, lsc_max_gain),
             GeqCalibration(cam, platform),
             LuxCalibration(cam, platform, lux_reference_target, lux_reference_method),
@@ -263,10 +292,11 @@ def run_ctt(
         cam.write_json(target=target, grid_size=grid_size)
         cam.write_log(log_output)
         # Final summary
-        mode = 'ALSC only' if alsc_only else ('AWB + CCM only' if colour_only else 'Full')
+        mode = _mode_label()
         n_macbeth = len(cam.imgs)
         n_alsc = len(cam.imgs_alsc)
         n_cac = len(cam.imgs_cac)
+        n_dark = len(cam.imgs_dark)
         _write_metrics(
             cam,
             json_output,
@@ -283,7 +313,7 @@ def run_ctt(
                 'lux_reference_method': lux_reference_method,
             },
         )
-        counts = f'Macbeth: {n_macbeth}  ALSC: {n_alsc}  CAC: {n_cac}'
+        counts = f'Macbeth: {n_macbeth}  ALSC: {n_alsc}  CAC: {n_cac}  Dark: {n_dark}'
         lines = [
             'Calibration complete',
             f'  Output  {json_output}',
@@ -338,6 +368,7 @@ def _write_metrics(cam: Camera, json_output: str, *, target: str, mode: str, con
             'macbeth': len(cam.imgs),
             'alsc': len(cam.imgs_alsc),
             'cac': len(cam.imgs_cac),
+            'dark': len(cam.imgs_dark),
         }
         cam.metrics['coverage'] = {
             'ct_min': cols[0] if cols else None,
@@ -380,6 +411,7 @@ def run_ctt_targets(
     targets: list[str],
     alsc_only: bool = False,
     colour_only: bool = False,
+    black_level_only: bool = False,
     template_path: str | None = None,
     update_path: str | None = None,
     plot_cli: list[str] | None = None,
@@ -406,6 +438,7 @@ def run_ctt_targets(
             target,
             alsc_only=alsc_only,
             colour_only=colour_only,
+            black_level_only=black_level_only,
             output_json_path=update_path,
             plot_cli=plot_cli,
             images=images,

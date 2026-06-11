@@ -62,6 +62,7 @@ class Camera:
         self.imgs = []
         self.imgs_alsc = []
         self.imgs_cac = []
+        self.imgs_dark = []
         self.log = _LogBuffer(f'Log created : {time.asctime(time.localtime(time.time()))}')
         self.log_separator = f'\n{"-" * 70}\n'
         self.jf = jfile
@@ -146,7 +147,7 @@ class Camera:
         # averaged internally; collect the groups so each is processed once.
         mac_groups: dict[str, list[str]] = {}
         for filename in filename_list:
-            if 'alsc' not in filename and 'cac' not in filename:
+            if 'alsc' not in filename and 'cac' not in filename and 'dark' not in filename:
                 mac_groups.setdefault(burst_group_key(filename), []).append(filename)
         for filename in filename_list:
             address = directory + filename
@@ -179,6 +180,17 @@ class Camera:
                 img.name = filename
                 self.log += f'\nColour temperature: {col} K'
                 self.imgs_cac.append(img)
+                if blacklevel != -1:
+                    img.blacklevel_16 = blacklevel
+                logger.info(f'\t{filename}')
+                continue
+            elif 'dark' in filename:
+                # Dark frames need no chart detection or demosaic; only the raw
+                # channel statistics are consumed (black level measurement).
+                img = load_image(self, address, mac=False, demosaic=False)
+                self.log += '\nIdentified as a dark frame'
+                img.name = filename
+                self.imgs_dark.append(img)
                 if blacklevel != -1:
                     img.blacklevel_16 = blacklevel
                 logger.info(f'\t{filename}')
@@ -218,16 +230,17 @@ class Camera:
         self.log += f'\nMacbeth : {len(self.imgs)}'
         self.log += f'\nALSC : {len(self.imgs_alsc)} '
         self.log += f'\nCAC: {len(self.imgs_cac)} '
+        self.log += f'\nDark: {len(self.imgs_dark)} '
         self.log += '\n\nCamera metadata'
         if len(self.imgs) == 0 and macbeth:
             logger.error('\nERROR: No usable macbeth chart images found')
             self.log += '\nERROR: No usable macbeth chart images found'
             return False
-        elif len(self.imgs) == 0 and len(self.imgs_alsc) == 0 and len(self.imgs_cac) == 0:
+        elif len(self.imgs) == 0 and len(self.imgs_alsc) == 0 and len(self.imgs_cac) == 0 and len(self.imgs_dark) == 0:
             logger.error('\nERROR: No usable images found')
             self.log += '\nERROR: No usable images found'
             return False
-        all_imgs = self.imgs + self.imgs_alsc + self.imgs_cac
+        all_imgs = self.imgs + self.imgs_alsc + self.imgs_cac + self.imgs_dark
         cam_names = list({img.cam_name for img in all_imgs})
         patterns = list({img.pattern for img in all_imgs})
         sigbitss = list({img.sigbits for img in all_imgs})

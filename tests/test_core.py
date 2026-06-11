@@ -147,7 +147,7 @@ class TestWriteMetrics:
         sidecar = tmp_path / 'cam_pisp_metrics.json'
         assert sidecar.exists()
         data = json.loads(sidecar.read_text())
-        assert data['counts'] == {'macbeth': 2, 'alsc': 1, 'cac': 0}
+        assert data['counts'] == {'macbeth': 2, 'alsc': 1, 'cac': 0, 'dark': 0}
         assert data['coverage']['ct_min'] == 2500
         assert data['coverage']['ct_max'] == 7000
         assert data['coverage']['ccm_matrices'] == 2

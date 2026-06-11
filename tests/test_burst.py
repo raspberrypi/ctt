@@ -85,7 +85,7 @@ class TestGroupAveraging:
 
         calls = iter(values)
 
-        def fake_load(cam, im_str):
+        def fake_load(cam, im_str, demosaic=True):
             img = Image()
             value = next(calls)
             img.channels = [np.full((64, 64), value, dtype=np.float64) for _ in range(4)]

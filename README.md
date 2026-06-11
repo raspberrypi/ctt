@@ -47,6 +47,15 @@ python3 -m ctt --alsc-only -i <image_dir> [-o <output_dir>] [-t pisp] [-t vc4]
 python3 -m ctt --colour-only -i <image_dir> [-o <output_dir>] [-t pisp] [-t vc4]
 ```
 
+### Black-level-only calibration
+
+Measures the sensor black level from dark frames (`dark_<n>.dng`, captured with
+the lens cap on / no light) and writes it to `rpi.black_level`:
+
+```bash
+python3 -m ctt --blacklevel-only -i <image_dir> [-o <output_dir>] [-t pisp] [-t vc4]
+```
+
 ### Update an existing tuning file
 
 Re-run calibrations using an existing file as a template. The target (pisp or vc4) is read from the tuning file; do not use `-t` with `--update`. The file is updated **in place**.
@@ -57,7 +66,7 @@ python3 -m ctt -i <image_dir> --update <existing.json>
 python3 -m ctt -i <image_dir> --update <existing.json> -o <output_dir> --name imx219
 ```
 
-With `--alsc-only` or `--colour-only`, only that section is re-calibrated; all other algorithm blocks in the file are left unchanged.
+With `--alsc-only`, `--colour-only` or `--blacklevel-only`, only that section is re-calibrated; all other algorithm blocks in the file are left unchanged.
 
 ```bash
 python3 -m ctt --alsc-only -i <image_dir> --update <existing.json>
@@ -98,6 +107,7 @@ python3 -m ctt --prettify [-t pisp|vc4] <input.json> [output.json]
 | `--plot` | Show matplotlib debug plot for algorithm (e.g. `awb`, `alsc`, `geq`, `noise`). Can be repeated or comma-separated. |
 | `--alsc-only` | Run only ALSC (lens shading) calibration |
 | `--colour-only` | Run only AWB and CCM calibrations |
+| `--blacklevel-only` | Run only the black level measurement (requires dark frames) |
 | `--convert` | Convert tuning file between VC4 and PiSP |
 | `--prettify` | Prettify an existing tuning file |
 
@@ -142,6 +152,7 @@ The tool looks only in the **root** of the input directory and uses **`.dng` fil
 
 - **ALSC images**: Filenames containing `alsc` and a colour temperature (e.g. `alsc_3000k_0.dng`). Uniform flat-field images at multiple colour temperatures.
 - **Macbeth images**: Filenames must encode colour temperature and lux in the form `...<temp>k_<lux>l.dng` (e.g. `d65_5858k_1344l.dng`). Images of a Macbeth ColorChecker chart for AWB, CCM, noise, lux, and GEQ.
+- **Dark frames**: Filenames containing `dark` (e.g. `dark_0.dng`), no other tags needed. Zero-light captures (lens cap on) used to measure the sensor black level; the measured value replaces the DNG metadata value throughout the run. Capture several at different shutter/gain settings to check black level stability against exposure.
 
 If a file is skipped (e.g. missing colour temp/lux in the filename, or Macbeth chart not found in the image), the tool prints a short message (e.g. colour temp/lux not in filename, or Macbeth not found) with the filename.
 
@@ -149,6 +160,7 @@ If a file is skipped (e.g. missing colour temp/lux in the filename, or Macbeth c
 
 | Algorithm | Key | Description |
 |-----------|-----|-------------|
+| Black level | `rpi.black_level` | Sensor black level measured from dark frames |
 | ALSC | `rpi.alsc` | Lens shading correction (colour and luminance) |
 | AWB | `rpi.awb` | Auto white balance calibration |
 | CCM | `rpi.ccm` | Colour correction matrices per illuminant |

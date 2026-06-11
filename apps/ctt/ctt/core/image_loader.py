@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def dng_load_image(cam: Camera, im_str: str) -> Image:
+def dng_load_image(cam: Camera | None, im_str: str, demosaic: bool = True) -> Image:
     try:
         img = Image()
 
@@ -88,12 +88,15 @@ def dng_load_image(cam: Camera, im_str: str) -> Image:
         c2 = np.left_shift(raw_data[1::2, 0::2].astype(np.int64), shift)
         c3 = np.left_shift(raw_data[1::2, 1::2].astype(np.int64), shift)
         img.channels = [c0, c1, c2, c3]
-        img.rgb = raw_im.postprocess()
+        # The demosaic is only needed when something consumes img.rgb (chart
+        # detection/plots); dark-frame measurement skips it for speed.
+        img.rgb = raw_im.postprocess() if demosaic else None
 
     except Exception:
         logger.error(f'\nERROR: failed to load DNG file {im_str}')
         logger.error('Either file does not exist or is incompatible')
-        cam.log += '\nERROR: DNG file does not exist or is incompatible'
+        if cam is not None:
+            cam.log += '\nERROR: DNG file does not exist or is incompatible'
         raise
 
     img.name = Path(im_str).name
@@ -178,9 +181,11 @@ def _detect_macbeth(cam: Camera, img: Image, mac_config: tuple | None, name: str
     return True
 
 
-def load_image(cam: Camera, im_str: str, mac_config: tuple | None = None, mac: bool = True) -> Image | None:
+def load_image(
+    cam: Camera, im_str: str, mac_config: tuple | None = None, mac: bool = True, demosaic: bool = True
+) -> Image | None:
     if '.dng' in im_str:
-        img = dng_load_image(cam, im_str)
+        img = dng_load_image(cam, im_str, demosaic=demosaic)
 
         if mac and not _detect_macbeth(cam, img, mac_config, Path(im_str).name):
             return None

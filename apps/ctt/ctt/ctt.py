@@ -61,6 +61,11 @@ def main() -> None:
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument('--alsc-only', action='store_true', help='Run only ALSC calibration')
     mode_group.add_argument('--colour-only', action='store_true', help='Run only AWB and CCM calibrations')
+    mode_group.add_argument(
+        '--blacklevel-only',
+        action='store_true',
+        help='Run only the black level measurement (requires dark frames, dark_<n>.dng)',
+    )
     mode_group.add_argument('--convert', action='store_true', help='Convert tuning file between vc4 <-> pisp')
     mode_group.add_argument('--prettify', action='store_true', help='Prettify an existing tuning file')
 
@@ -176,6 +181,7 @@ def main() -> None:
         targets,
         alsc_only=args.alsc_only,
         colour_only=args.colour_only,
+        black_level_only=args.blacklevel_only,
         template_path=args.template,
         update_path=args.update,
         plot_cli=args.plot,
