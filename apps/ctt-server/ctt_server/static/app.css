@@ -328,6 +328,17 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .console .cmd { color: var(--accent-2); }
 .console .dim { color: var(--text-faint); }
 
+/* --- tuning JSON viewer --- */
+.json-view {
+  background: #0a0d12; border: 1px solid var(--border); border-radius: var(--radius);
+  font-family: var(--mono); font-size: 0.82rem; line-height: 1.5;
+  padding: 16px; max-height: 560px; overflow: auto; white-space: pre; margin: 0;
+}
+.json-view .j-key { color: var(--accent-2); }
+.json-view .j-str { color: var(--ok); }
+.json-view .j-num { color: #50a0ff; }  /* matches the charts' blue channel */
+.json-view .j-kw  { color: var(--warn); }
+
 /* --- tables --- */
 table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
 th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }

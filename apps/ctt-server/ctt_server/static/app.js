@@ -21,6 +21,22 @@ function saveFlip(hflip, vflip) {
   try { localStorage.setItem('cttFlip', JSON.stringify({ hflip: !!hflip, vflip: !!vflip })); } catch (e) { /* ignore */ }
 }
 
+// Minimal JSON syntax highlighter for the tuning-file viewer: escape the text,
+// then wrap strings (keys vs values), numbers and keywords in coloured spans.
+// Oversized files are returned escaped-but-plain to keep the DOM manageable.
+function highlightJson(text) {
+  const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  if (esc.length > 1_500_000) return esc;
+  return esc.replace(
+    /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g,
+    (m, str, colon, kw) => {
+      if (str) return colon ? `<span class="j-key">${str}</span>${colon}` : `<span class="j-str">${str}</span>`;
+      if (kw) return `<span class="j-kw">${kw}</span>`;
+      return `<span class="j-num">${m}</span>`;
+    },
+  );
+}
+
 function detectType(name) {
   if (name.includes('alsc')) return 'alsc';
   if (name.includes('cac')) return 'cac';
@@ -669,6 +685,7 @@ function resultsApp(cfg) {
     alscHover: null,             // {col,row,r,g,b} gains under the cursor on the ALSC grid
     runs: cfg.runs || {}, // target -> {label, epoch}: when each tuning file was generated
     autoPreview: cfg.autoPreview || false,  // Preview page: start the live test on load
+    tuningHtml: '',       // Tuning page: the selected target's JSON, syntax-highlighted
     _charts: {},
     // live preview test
     busy: false,
@@ -965,6 +982,7 @@ function resultsApp(cfg) {
 
     async select(t) {
       this.target = t;
+      if (cfg.showJson) this.loadTuningText(t);
       const r = await fetch(`/projects/${this.project}/results/data?target=${t}`);
       if (!r.ok) return;
       const data = await r.json();
@@ -978,6 +996,16 @@ function resultsApp(cfg) {
       // Wait for Alpine to apply x-show/x-if, then a layout frame, so each
       // canvas's container has its final size before Chart.js measures it.
       this.$nextTick(() => requestAnimationFrame(() => this.renderCharts()));
+    },
+
+    // Tuning page: fetch the selected target's tuning JSON for the contents box.
+    async loadTuningText(t) {
+      this.tuningHtml = '';
+      try {
+        const r = await fetch(`/projects/${this.project}/download/json/${t}`);
+        const text = r.ok ? await r.text() : '';
+        if (this.target === t) this.tuningHtml = highlightJson(text);  // ignore a stale fetch after a quick re-switch
+      } catch (e) { /* box stays empty */ }
     },
 
     // The selected CT's per-patch entry, and its mean/worst ΔE for the stat row.

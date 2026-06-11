@@ -8,7 +8,7 @@
   <div class="card"><div class="empty"><div class="big">📄</div>No tuning files yet.
     <a href="{{ url_for('run_page', name=project.name) }}">Run CTT</a> to generate them.</div></div>
 {% else %}
-<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, runs: {{ runs|tojson }} })' x-init="init()">
+<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, runs: {{ runs|tojson }}, showJson: true })' x-init="init()">
   <!-- Tuning files -->
   <div class="card">
     <div class="card-head">
@@ -26,11 +26,16 @@
       <a class="btn" :href="'/projects/{{ project.name }}/download/log/'+target">⬇ Download log</a>
       <a class="btn ghost" href="{{ url_for('download_archive', name=project.name) }}">⬇ Download project (.zip)</a>
     </div>
-    <div class="mt muted" x-show="summary">
-      Target <b x-text="summary?.target"></b> · version <span x-text="summary?.version"></span> ·
-      <span x-text="summary?.algorithms?.length"></span> algorithm blocks
-      <template x-if="summary?.black_level !== undefined"> · black level <b x-text="summary?.black_level"></b></template>
+  </div>
+
+  <!-- File contents (follows the PiSP/VC4 selection above) -->
+  <div class="card mt">
+    <div class="card-head">
+      <h2>File contents</h2>
+      <span class="muted" x-text="target.toUpperCase()"></span>
     </div>
+    {# x-html is safe here: highlightJson escapes the text before adding its own spans #}
+    <pre class="json-view" x-html="tuningHtml || 'Loading…'"></pre>
   </div>
 </div>
 {% endif %}
