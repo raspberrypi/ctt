@@ -12,6 +12,8 @@ new_outputs/
 reference_outputs/
 ctt_log.txt
 *.png
+# documentation screenshots are tracked
+!docs/images/*.png
 
 .venv/
 .env/
