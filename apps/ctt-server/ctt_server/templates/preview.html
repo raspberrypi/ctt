@@ -120,7 +120,8 @@
           <label>Illuminant</label>
           <select x-model.number="lightbox.channel" @change="setIlluminant()">
             <template x-for="[ch, name] in Object.entries(lightbox.illuminants)" :key="ch">
-              <option :value="Number(ch)" x-text="ch + ' — ' + name"></option>
+              <option :value="Number(ch)" x-text="ch + ' — ' + name"
+                      :title="(lightbox.illuminant_labels && lightbox.illuminant_labels[ch]) || name"></option>
             </template>
           </select>
         </div>

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import enum
 import logging
 import threading
 
@@ -16,8 +17,42 @@ from ..lightbox import Lightbox, LightboxError
 
 logger = logging.getLogger(__name__)
 
+
+class Illuminant(enum.StrEnum):
+    """The lightSTUDIO-S illuminants, for typo-safe scripting.
+
+    Any API that takes an illuminant also accepts these (they are plain strings),
+    e.g. box.set_illuminant(Illuminant.D65).
+
+    Members are deliberately named exactly like their string values (rather than
+    PEP 8's UPPER_CASE) so the two spellings can never diverge.
+    """
+
+    F12 = 'F12'
+    F11 = 'F11'
+    D50 = 'D50'
+    D65 = 'D65'
+    Halogen10 = 'Halogen10'
+    Halogen100 = 'Halogen100'
+    Halogen400 = 'Halogen400'
+    HalogenBF = 'HalogenBF'
+
+
 # Fixed illuminant per channel on the lightSTUDIO-S (from the CLI manual).
 CHANNEL_NAMES = {
+    1: str(Illuminant.F12),
+    2: str(Illuminant.F11),
+    3: str(Illuminant.D50),
+    4: str(Illuminant.D65),
+    5: str(Illuminant.Halogen10),
+    6: str(Illuminant.Halogen100),
+    7: str(Illuminant.Halogen400),
+    8: str(Illuminant.HalogenBF),
+}
+
+# Descriptive labels for UIs; also accepted as illuminant names (matching folds
+# case, spacing and punctuation, so e.g. 'halogen (10 lux)' resolves channel 5).
+CHANNEL_LABELS = {
     1: 'F12',
     2: 'F11',
     3: 'D50',
@@ -180,11 +215,15 @@ class LightStudioS(Lightbox):
         return CHANNEL_NAMES
 
     @property
+    def illuminant_labels(self) -> dict[int, str]:
+        return CHANNEL_LABELS
+
+    @property
     def illuminant_temps(self) -> dict[int, int]:
         return CHANNEL_TEMPS
 
-    # --- control primitives ------------------------------------------------
-    def set_intensity(self, channel: int, percent: float) -> None:
+    # --- control primitives (the base class resolves names and validates) ---
+    def _set_intensity(self, channel: int, percent: float) -> None:
         """Set `channel` to `percent` (0–100 %). Also makes it the active channel.
 
         Mirrors the CLI's `--channel N --setIntensity P`; setting an intensity is how
@@ -194,27 +233,19 @@ class LightStudioS(Lightbox):
         with self._lock:
             self._set_intensity_locked(channel, self._clamp_percent(percent))
 
-    def get_intensity(self) -> float:
-        """Read the active channel's intensity (0–100 %).
-
-        The device only reports the *current* channel, so this takes no argument
-        (matching the CLI's `--getIntensity`).
-        """
+    def _get_state(self) -> tuple[int, float]:
+        """Read (channel, intensity) under one lock — the device only reports the
+        *current* channel (CLI `--getChannel` / `--getIntensity`)."""
         with self._lock:
-            return self._get_intensity_locked()
+            return self._get_channel_locked(), self._get_intensity_locked()
 
-    def get_channel(self) -> int:
-        """Return the currently selected channel number."""
-        with self._lock:
-            return self._get_channel_locked()
-
-    def get_default_intensity(self, channel: int) -> float:
+    def _get_default_intensity(self, channel: int) -> float:
         """Return `channel`'s power-on default intensity (0–100 %)."""
         self._validate_channel(channel)
         with self._lock:
             return self._get_default_intensity_locked(channel)
 
-    def set_channel(self, channel: int) -> None:
+    def _set_channel(self, channel: int) -> None:
         """Switch on `channel` at its stored default intensity (CLI `--setChannel`)."""
         self._validate_channel(channel)
         with self._lock:

@@ -9,7 +9,7 @@
 import pytest
 
 from ctt.devices import LightboxError
-from ctt.devices.lightstudio_s import CHANNEL_NAMES, CHANNEL_TEMPS, LightStudioS
+from ctt.devices.lightstudio_s import CHANNEL_LABELS, CHANNEL_NAMES, CHANNEL_TEMPS, Illuminant, LightStudioS
 
 
 def _bare():
@@ -87,8 +87,18 @@ def test_illuminant_temps_property():
 def test_resolve_illuminant_on_real_map():
     # The generic name→channel resolver, exercised against the driver's illuminants.
     box = _bare()
-    assert box._resolve_illuminant('D65') == 4
-    assert box._resolve_illuminant('f12') == 1
+    assert box._resolve('D65') == 4
+    assert box._resolve('f12') == 1
+    assert box._resolve(Illuminant.HalogenBF) == 8
+    assert box._resolve('halogenbf') == 8
+    assert box._resolve('Halogen (10 lux)') == 5  # descriptive labels resolve too
+    assert box._resolve('halogen 100') == 6
+    assert box._resolve(7) == 7
+
+
+def test_labels_cover_all_channels():
+    assert set(CHANNEL_LABELS) == set(CHANNEL_NAMES)
+    assert CHANNEL_LABELS[8] == 'Halogen + blue filter (400 lux)'
 
 
 def test_unconfigured_id_raises():
