@@ -107,20 +107,56 @@ def dng_load_image(cam: Camera | None, im_str: str, demosaic: bool = True) -> Im
     return img
 
 
-def apply_gamma(av_chan: np.ndarray, cam: Camera) -> np.ndarray:
-    """Tone-map a linear 0-1 image with the tuning template's gamma curve.
+# Fixed tone curve for chart *location* only (patch values are always sampled from
+# the untouched linear channels, so this has no effect on calibration results).
+# Piecewise-linear LUT of (x, y) pairs, both 0-65535; a copy of the vc4 template's
+# rpi.contrast gamma_curve. A fixed curve makes detection identical across targets:
+# previously the same image could be found in a vc4 run but discarded from the pisp
+# run. Deliberately a constant rather than read from the template, so template edits
+# cannot silently change detection.
+DETECTION_GAMMA_CURVE = np.array(
+    [
+        [0, 0],
+        [1024, 5040],
+        [2048, 9338],
+        [3072, 12356],
+        [4096, 15312],
+        [5120, 18051],
+        [6144, 20790],
+        [7168, 23193],
+        [8192, 25744],
+        [9216, 27942],
+        [10240, 30035],
+        [11264, 32005],
+        [12288, 33975],
+        [13312, 35815],
+        [14336, 37600],
+        [15360, 39168],
+        [16384, 40642],
+        [18432, 43379],
+        [20480, 45749],
+        [22528, 47753],
+        [24576, 49621],
+        [26624, 51253],
+        [28672, 52698],
+        [30720, 53796],
+        [32768, 54876],
+        [36864, 57012],
+        [40960, 58656],
+        [45056, 59954],
+        [49152, 61183],
+        [53248, 62355],
+        [57344, 63419],
+        [61440, 64476],
+        [65535, 65535],
+    ],
+    dtype=np.float64,
+)
 
-    The template's rpi.contrast gamma_curve is a piecewise-linear LUT of flat
-    [x0, y0, x1, y1, ...] pairs, input and output both 0-65535. Mapping the linear
-    Bayer mean through it reproduces the preview tone curve, which is what makes the
-    Macbeth chart reliably detectable. Falls back to a plain 2.2 gamma if the template
-    has no contrast curve (e.g. it was disabled).
-    """
-    curve = cam.json.get('rpi.contrast', {}).get('gamma_curve') if isinstance(cam.json, dict) else None
-    if not curve:
-        return np.power(np.clip(av_chan, 0, 1), 1 / 2.2)
-    pts = np.asarray(curve, dtype=np.float64).reshape(-1, 2)
-    xs, ys = pts[:, 0], pts[:, 1]
+
+def apply_gamma(av_chan: np.ndarray) -> np.ndarray:
+    """Tone-map a linear 0-1 image with the fixed detection gamma curve."""
+    xs, ys = DETECTION_GAMMA_CURVE[:, 0], DETECTION_GAMMA_CURVE[:, 1]
     return np.interp(np.clip(av_chan, 0, 1) * 65535.0, xs, ys) / 65535.0
 
 
@@ -154,12 +190,11 @@ def _detect_macbeth(cam: Camera, img: Image, mac_config: tuple | None, name: str
         # Locate the chart on a tone-mapped copy. The raw Bayer mean is linear,
         # so patch-to-patch contrast in the shadows/mid-tones is compressed and
         # Canny edge detection misses the patch borders -- worst under high-CT
-        # light, where the red channel is weak. Applying the tuning template's
-        # gamma curve expands that low/mid contrast (matching the tone-mapped
-        # preview in which the chart is always found) and makes detection robust.
-        # Only the location search sees this; patch values are still read from the
-        # untouched linear channels in get_patches, so calibration is unchanged.
-        det_chan = apply_gamma(av_chan, cam)
+        # light, where the red channel is weak. The fixed detection curve expands
+        # that low/mid contrast (see DETECTION_GAMMA_CURVE). Only the location
+        # search sees this; patch values are still read from the untouched linear
+        # channels in get_patches, so calibration is unchanged.
+        det_chan = apply_gamma(av_chan)
         result = find_macbeth(cam, det_chan, mac_config)
 
     if result is None or result[0] is None:
