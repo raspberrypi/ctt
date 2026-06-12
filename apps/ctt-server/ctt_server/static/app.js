@@ -873,6 +873,28 @@ function resultsApp(cfg) {
       finally { this.busy = false; }
     },
 
+    // Switch to one of the camera's advertised sensor modes ("WxH" from the
+    // dropdown). Captures follow the selected mode's resolution.
+    async applyMode(val) {
+      const [width, height] = val.split('x').map(Number);
+      this.busy = true; this.testError = '';
+      if (this.testing) this.previewSrc = '';  // close the MJPEG stream before the camera reconfigures
+      try {
+        const r = await fetch('/api/mode', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ width, height }),
+        });
+        if (!r.ok) throw new Error();
+        const m = await r.json();
+        this.camera.resolution = m.resolution;
+        await this._loadCamInfo();  // the mode changes the control limits (exposure, frame duration)
+      } catch (e) { this.testError = 'Failed to switch sensor mode'; }
+      finally {
+        this.busy = false;
+        if (this.testing) this.previewSrc = '/api/preview?t=' + Date.now();
+      }
+    },
+
     // Fetch sensor model/resolution (and seed metered values) for the info box.
     async _loadCamInfo() {
       try {
@@ -881,6 +903,7 @@ function resultsApp(cfg) {
         const h = await r.json();
         if (h.model) this.camera.model = h.model;
         if (h.resolution) this.camera.resolution = h.resolution;
+        if (h.modes) this.camera.modes = h.modes;
         if (h.controls) {
           this.metered = { ...h.controls };
           this.controls = { ...h.controls };
