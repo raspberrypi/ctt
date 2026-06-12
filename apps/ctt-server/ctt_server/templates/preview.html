@@ -62,7 +62,7 @@
             </div>
           </div>
           <div>
-            <span class="k">FPS <span style="text-transform:none" x-text="metered.measured_fps ? '· ' + metered.measured_fps + ' actual' : ''"></span></span>
+            <span class="k">FPS <span style="text-transform:none" x-text="metered.measured_fps ? '· ' + metered.measured_fps + ' actual' : ''"></span> <span class="fps-warn" x-show="fpsUnachievable()" x-cloak :title="'Not achievable in this sensor mode (max ' + fpsMax().toFixed(1) + ' fps) — auto-exposure can use up to the actual frame time'">⚠</span></span>
             <input type="number" min="0" max="120" step="1" x-model.number="fpsTarget" @change="applyFps()"
                    title="Fixed framerate; 0 = unconstrained (variable frame duration, allows long exposures)"
                    style="width:90px; padding:4px 8px; font-size:0.85rem">

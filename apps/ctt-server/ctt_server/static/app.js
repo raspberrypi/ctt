@@ -300,6 +300,15 @@ function captureApp(cfg) {
       } catch (e) { /* preview not critical */ }
     },
 
+    fpsMax() {
+      // Fastest rate the current sensor mode allows (the frame duration clamps
+      // to the mode's minimum, so a higher target silently runs slower).
+      return this.metered.frame_duration_min ? 1000000 / this.metered.frame_duration_min : 0;
+    },
+    fpsUnachievable() {
+      return !!(this.fpsTarget && this.fpsMax() && this.fpsTarget > this.fpsMax() + 0.05);
+    },
+
     async applyFps() {
       try {
         const r = await fetch('/api/controls', {
@@ -899,6 +908,15 @@ function resultsApp(cfg) {
       if (!this.controls.exposure_max) return null;  // limits not fetched yet
       const fpsCap = this.fpsTarget ? Math.floor(1000000 / this.fpsTarget) : this.controls.frame_duration_max;
       return Math.min(this.controls.exposure_max, fpsCap);
+    },
+
+    fpsMax() {
+      // Fastest rate the current sensor mode allows (the frame duration clamps
+      // to the mode's minimum, so a higher target silently runs slower).
+      return this.metered.frame_duration_min ? 1000000 / this.metered.frame_duration_min : 0;
+    },
+    fpsUnachievable() {
+      return !!(this.fpsTarget && this.fpsMax() && this.fpsTarget > this.fpsMax() + 0.05);
     },
 
     async applyFps() {
