@@ -184,8 +184,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
         if box is None:
             return {'present': False}
         try:
-            info = box.info()
-            return {'present': True, 'illuminants': box.illuminants, **info}
+            return {'present': True, **box.info()}
         except LightboxError:  # device went away mid-session
             return {'present': False}
 
@@ -354,19 +353,18 @@ def create_app(workspace_root: str | None = None) -> Flask:
         box = lightbox_or_503()
         body = request.get_json(force=True) or {}
         percent = body.get('percent')
+        if percent is not None:
+            percent = float(percent)
+        # set_illuminant accepts names and channel numbers alike, so 'illuminant'
+        # and 'channel' are interchangeable; a bare 'percent' adjusts the active one.
+        target = body.get('illuminant') if body.get('illuminant') is not None else body.get('channel')
         try:
             if body.get('off'):
                 box.off()
-            elif body.get('illuminant') is not None:
-                box.set_illuminant(body['illuminant'], None if percent is None else float(percent))
-            elif body.get('channel') is not None:
-                channel = int(body['channel'])
-                if percent is None:
-                    box.set_channel(channel)
-                else:
-                    box.set_intensity(channel, float(percent))
+            elif target is not None:
+                box.set_illuminant(target, percent)
             elif percent is not None:
-                box.set_intensity(box.get_channel(), float(percent))
+                box.set_illuminant(box.get_state().channel, percent)
         except (LightboxError, TypeError, ValueError) as err:
             return jsonify({'error': str(err)}), 400
         return jsonify(lightbox_status())

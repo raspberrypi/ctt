@@ -4,6 +4,6 @@
 #
 # Image Engineering lightSTUDIO-S driver package.
 
-from .device import CHANNEL_NAMES, CHANNEL_TEMPS, LightStudioS
+from .device import CHANNEL_LABELS, CHANNEL_NAMES, CHANNEL_TEMPS, Illuminant, LightStudioS
 
-__all__ = ['CHANNEL_NAMES', 'CHANNEL_TEMPS', 'LightStudioS']
+__all__ = ['CHANNEL_LABELS', 'CHANNEL_NAMES', 'CHANNEL_TEMPS', 'Illuminant', 'LightStudioS']

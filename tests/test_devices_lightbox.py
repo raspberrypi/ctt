@@ -27,20 +27,17 @@ class FakeBox(Lightbox):
     def illuminants(self):
         return self._ILLUM
 
-    def set_intensity(self, channel, percent):
+    def _set_intensity(self, channel, percent):
         self._channel = channel
         self._intensity[channel] = percent
 
-    def get_intensity(self):
-        return self._intensity.get(self._channel, 0.0)
+    def _get_state(self):
+        return self._channel, self._intensity.get(self._channel, 0.0)
 
-    def get_channel(self):
-        return self._channel
-
-    def set_channel(self, channel):
+    def _set_channel(self, channel):
         self._channel = channel
 
-    def get_default_intensity(self, channel):
+    def _get_default_intensity(self, channel):
         return 100.0
 
     def close(self):
@@ -60,10 +57,35 @@ def clean_registry():
 def test_set_illuminant_resolves_name_case_insensitively():
     box = FakeBox()
     assert box.set_illuminant('d65') == 4
-    assert box.get_channel() == 4
+    assert box.get_state().channel == 4
     box.set_illuminant('F12', 50)
-    assert box.get_channel() == 1
-    assert box.get_intensity() == 50
+    assert box.get_state().channel == 1
+    assert box.get_state().intensity == 50
+
+
+def test_set_illuminant_accepts_names_and_channels():
+    box = FakeBox()
+    assert box.set_illuminant('d65', 40) == 4
+    assert box.get_state().intensity == 40
+    assert box.set_illuminant(1, 60) == 1
+    assert box.set_illuminant('D65') == 4
+    assert box.get_default_intensity('f12') == 100.0
+    assert box.set_illuminant('4') == 4  # numeric strings are channel numbers
+
+
+def test_resolve_folds_labels_and_aliases():
+    class LabelledBox(FakeBox):
+        @property
+        def illuminant_labels(self):
+            return {1: 'F12 (fluorescent)', 4: 'D65'}
+
+        @property
+        def illuminant_aliases(self):
+            return {4: {'daylight'}}
+
+    box = LabelledBox()
+    assert box.set_illuminant('f12 (Fluorescent)') == 1  # label, case/punctuation folded
+    assert box.set_illuminant('Daylight') == 4  # driver alias
 
 
 def test_set_illuminant_unknown_name_raises():
@@ -75,7 +97,7 @@ def test_off_zeroes_active_channel():
     box = FakeBox()
     box.set_illuminant('D65', 90)
     box.off()
-    assert box.get_intensity() == 0
+    assert box.get_state().intensity == 0
 
 
 def test_info_snapshot():
@@ -110,15 +132,12 @@ def test_registry_skips_absent_driver(clean_registry):
 
         illuminants = {}
 
-        def set_intensity(self, channel, percent): ...
-        def get_intensity(self):
-            return 0.0
+        def _set_intensity(self, channel, percent): ...
+        def _get_state(self):
+            return 0, 0.0
 
-        def get_channel(self):
-            return 0
-
-        def set_channel(self, channel): ...
-        def get_default_intensity(self, channel):
+        def _set_channel(self, channel): ...
+        def _get_default_intensity(self, channel):
             return 0.0
 
         def close(self): ...
