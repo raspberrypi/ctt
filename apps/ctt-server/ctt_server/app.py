@@ -261,6 +261,20 @@ def create_app(workspace_root: str | None = None) -> Flask:
         body = request.get_json(force=True) or {}
         return jsonify(camera_or_503().set_transform(bool(body.get('hflip')), bool(body.get('vflip'))))
 
+    @app.route('/api/mode', methods=['POST'])
+    def api_mode():
+        """Switch the camera to one of its advertised sensor modes."""
+        cam = camera_or_503()
+        body = request.get_json(force=True) or {}
+        try:
+            width, height = int(body['width']), int(body['height'])
+        except (KeyError, TypeError, ValueError):
+            return jsonify({'error': 'width and height are required'}), 400
+        try:
+            return jsonify(cam.set_mode(width, height))
+        except CameraError as err:
+            return jsonify({'error': str(err)}), 400
+
     @app.route('/api/histogram')
     def api_histogram():
         return jsonify(camera_or_503().histogram())

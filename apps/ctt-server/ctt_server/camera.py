@@ -26,10 +26,10 @@ logger = logging.getLogger(__name__)
 # console stays readable; warnings/errors still show and an explicit user value wins.
 os.environ.setdefault('LIBCAMERA_LOG_LEVELS', 'WARN')
 
-# Full-resolution raw size is sensor-specific and constant, but reading
-# Picamera2.sensor_modes probes every mode (slow + noisy). Cache it per model so the
-# camera can be reopened (e.g. a tuning reload) without re-probing.
-_RAW_SIZE_CACHE: dict[str, tuple[int, int]] = {}
+# The advertised sensor modes are sensor-specific and constant, but reading
+# Picamera2.sensor_modes probes every mode (slow + noisy). Cache them per model so
+# the camera can be reopened (e.g. a tuning reload) without re-probing.
+_SENSOR_MODES_CACHE: dict[str, list[dict]] = {}
 _picamera2_logging_quieted = False
 
 # JPEG frame boundary used for the MJPEG multipart stream.
@@ -79,23 +79,29 @@ class Picamera2Camera:
             self._picam2 = Picamera2()
         try:
             self.model = self._picam2.camera_properties.get('Model', 'unknown')
-            # Full-resolution raw stream (full sensor field of view) → full-res DNGs.
-            # Pick the largest available raw sensor mode (the full readout), rather than
-            # sensor_resolution, since the pixel-array size isn't always a usable mode.
-            # Reading sensor_modes probes every mode, so cache the result per model and
-            # reuse it when the camera is reopened (e.g. a tuning reload).
-            raw_size = _RAW_SIZE_CACHE.get(self.model)
-            if raw_size is None:
-                largest = max(self._picam2.sensor_modes, key=lambda m: m['size'][0] * m['size'][1])['size']
-                raw_size = (int(largest[0]), int(largest[1]))
-                _RAW_SIZE_CACHE[self.model] = raw_size
-            sensor_w, sensor_h = raw_size
-            self.resolution = (sensor_w, sensor_h)
-            self._raw_size = raw_size
-            # Preview derived from the full-res frame, scaled down preserving aspect.
-            prev_w = min(preview_max_width, sensor_w) & ~1
-            prev_h = int(round(prev_w * sensor_h / sensor_w)) & ~1
-            self._preview_size = (prev_w, prev_h)
+            # Advertised sensor modes, one entry per raw size (preferring the deeper
+            # readout when sizes repeat). Probing sensor_modes is slow, so cache per
+            # model and reuse when the camera is reopened (e.g. a tuning reload).
+            modes = _SENSOR_MODES_CACHE.get(self.model)
+            if modes is None:
+                by_size: dict[tuple[int, int], dict] = {}
+                for m in self._picam2.sensor_modes:
+                    size = (int(m['size'][0]), int(m['size'][1]))
+                    entry = {
+                        'size': size,
+                        'bit_depth': int(m.get('bit_depth', 0)),
+                        'fps': round(float(m.get('fps', 0.0)), 1),
+                    }
+                    if size not in by_size or entry['bit_depth'] > by_size[size]['bit_depth']:
+                        by_size[size] = entry
+                modes = sorted(by_size.values(), key=lambda m: m['size'][0] * m['size'][1], reverse=True)
+                _SENSOR_MODES_CACHE[self.model] = modes
+            self.sensor_modes = modes
+            self._preview_max_width = preview_max_width
+            # Default to the largest mode (the full sensor readout) → full-res DNGs.
+            # Picked over sensor_resolution since the pixel-array size isn't always a
+            # usable mode.
+            self._apply_mode(modes[0])
             # Sensor flip (applied at configure time via a libcamera Transform); affects
             # both the live preview and the captured raw/DNG/PNG.
             self._hflip = False
@@ -117,6 +123,43 @@ class Picamera2Camera:
 
         return Transform(hflip=1 if self._hflip else 0, vflip=1 if self._vflip else 0)
 
+    def _apply_mode(self, mode: dict) -> None:
+        """Adopt a sensor mode: raw/capture size, bit depth and preview size."""
+        w, h = (int(mode['size'][0]), int(mode['size'][1]))
+        self._raw_size = (w, h)
+        self._raw_bit_depth = int(mode.get('bit_depth', 0)) or None
+        self.resolution = self._raw_size
+        # Preview derived from the mode's frame, scaled down preserving aspect.
+        prev_w = min(self._preview_max_width, w) & ~1
+        prev_h = int(round(prev_w * h / w)) & ~1
+        self._preview_size = (prev_w, prev_h)
+
+    def _sensor_config(self) -> dict:
+        # sensor= pins the actual camera mode (readout/binning) so libcamera
+        # cannot satisfy the request by picking another mode and rescaling.
+        cfg: dict = {'output_size': self._raw_size}
+        if self._raw_bit_depth:
+            cfg['bit_depth'] = self._raw_bit_depth
+        return cfg
+
+    def set_mode(self, width: int, height: int) -> dict:
+        """Switch to an advertised sensor mode and reconfigure the live pipeline.
+
+        All subsequent captures (DNG/JPEG/PNG) are at the selected mode's
+        resolution, and the preview is rescaled from it.
+        """
+        size = (int(width), int(height))
+        mode = next((m for m in self.sensor_modes if tuple(m['size']) == size), None)
+        if mode is None:
+            raise CameraError(f'{size[0]}x{size[1]} is not an advertised sensor mode')
+        with self._lock:
+            self._apply_mode(mode)
+            self._picam2.stop()
+            self._picam2.configure(self._video_config())
+            self._picam2.start()
+        time.sleep(0.3)  # let the pipeline settle before the next frame is served
+        return {'resolution': list(self.resolution)}
+
     def _frame_duration_limits(self) -> tuple[int, int]:
         """FrameDurationLimits for the current fps target (0 = unconstrained).
 
@@ -136,6 +179,7 @@ class Picamera2Camera:
         return self._picam2.create_video_configuration(
             main={'size': self._preview_size, 'format': 'RGB888'},
             raw={'size': self._raw_size},
+            sensor=self._sensor_config(),
             transform=self._transform(),
             buffer_count=4,
             controls={'FrameDurationLimits': self._frame_duration_limits()},
@@ -228,6 +272,7 @@ class Picamera2Camera:
         with self._lock:
             still = self._picam2.create_still_configuration(
                 main={'size': self.resolution, 'format': 'RGB888'},
+                sensor=self._sensor_config(),
                 transform=self._transform(),
             )
             arr = self._picam2.switch_mode_and_capture_array(still, 'main')
@@ -399,6 +444,7 @@ class Picamera2Camera:
             still = self._picam2.create_still_configuration(
                 main={'size': self.resolution, 'format': 'RGB888'},
                 raw={'size': self._raw_size},
+                sensor=self._sensor_config(),
                 transform=self._transform(),
             )
             self._picam2.switch_mode(still)
@@ -435,6 +481,9 @@ class Picamera2Camera:
         return {
             'model': self.model,
             'resolution': list(self.resolution),
+            'modes': [
+                {'size': list(m['size']), 'bit_depth': m['bit_depth'], 'fps': m['fps']} for m in self.sensor_modes
+            ],
             'controls': self.get_controls(),
             'tuning': os.path.basename(self.tuning_file) if self.tuning_file else None,
             'hflip': self._hflip,
