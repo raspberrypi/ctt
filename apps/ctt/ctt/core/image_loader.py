@@ -80,17 +80,21 @@ def dng_load_image(cam: Camera | None, im_str: str, demosaic: bool = True) -> Im
             img.pattern = 128  # mono DNGs have no CFA
             img.order = (0, 1, 2, 3)
 
-        raw_im = raw.imread(im_str)
-        raw_data = raw_im.raw_image
-        shift = 16 - img.sigbits
-        c0 = np.left_shift(raw_data[0::2, 0::2].astype(np.int64), shift)
-        c1 = np.left_shift(raw_data[0::2, 1::2].astype(np.int64), shift)
-        c2 = np.left_shift(raw_data[1::2, 0::2].astype(np.int64), shift)
-        c3 = np.left_shift(raw_data[1::2, 1::2].astype(np.int64), shift)
-        img.channels = [c0, c1, c2, c3]
-        # The demosaic is only needed when something consumes img.rgb (chart
-        # detection/plots); dark-frame measurement skips it for speed.
-        img.rgb = raw_im.postprocess() if demosaic else None
+        with raw.imread(im_str) as raw_im:
+            raw_data = raw_im.raw_image
+            shift = 16 - img.sigbits
+            # Channels are stored as uint16: values fit exactly (sigbits + shift == 16),
+            # and a full set of int64 channels for a calibration run exhausts the RAM of
+            # a Pi. Consumers must promote before arithmetic that can leave the range
+            # (sums, black-level subtraction).
+            c0 = np.left_shift(raw_data[0::2, 0::2].astype(np.uint16), shift)
+            c1 = np.left_shift(raw_data[0::2, 1::2].astype(np.uint16), shift)
+            c2 = np.left_shift(raw_data[1::2, 0::2].astype(np.uint16), shift)
+            c3 = np.left_shift(raw_data[1::2, 1::2].astype(np.uint16), shift)
+            img.channels = [c0, c1, c2, c3]
+            # The demosaic is only needed when something consumes img.rgb (currently
+            # just CAC); everything else skips it for speed and memory.
+            img.rgb = raw_im.postprocess() if demosaic else None
 
     except Exception:
         logger.error(f'\nERROR: failed to load DNG file {im_str}')
@@ -196,7 +200,9 @@ def load_image(
         return None
 
 
-def load_image_group(cam: Camera, im_strs: list[str], mac_config: tuple | None = None) -> Image | None:
+def load_image_group(
+    cam: Camera, im_strs: list[str], mac_config: tuple | None = None, demosaic: bool = True
+) -> Image | None:
     """Load a burst group of Macbeth captures as one internally-averaged Image.
 
     The frames are exposures of the same scene (same filename apart from the
@@ -207,14 +213,21 @@ def load_image_group(cam: Camera, im_strs: list[str], mac_config: tuple | None =
     single-frame statistics.
     """
     if len(im_strs) == 1:
-        return load_image(cam, im_strs[0], mac_config)
+        return load_image(cam, im_strs[0], mac_config, demosaic=demosaic)
 
-    imgs = [dng_load_image(cam, im_str) for im_str in im_strs]
-    base = imgs[0]
+    # Average the frames one at a time: holding a whole burst in memory at once
+    # is a sizeable chunk of a Pi's RAM. float64 sums of uint16 data are exact,
+    # so this matches np.mean over the stacked frames bit for bit.
+    base = dng_load_image(cam, im_strs[0], demosaic=demosaic)
     single_channels = base.channels
-    base.channels = [np.mean([img.channels[i] for img in imgs], axis=0) for i in range(len(base.channels))]
-    base.frames_averaged = len(imgs)
-    cam.log += f'\nAveraged {len(imgs)} burst frames'
+    sums = [ch.astype(np.float64) for ch in single_channels]
+    for im_str in im_strs[1:]:
+        img = dng_load_image(cam, im_str, demosaic=False)
+        for i, ch in enumerate(img.channels):
+            sums[i] += ch
+    base.channels = [s / len(im_strs) for s in sums]
+    base.frames_averaged = len(im_strs)
+    cam.log += f'\nAveraged {len(im_strs)} burst frames'
 
     if not _detect_macbeth(cam, base, mac_config, base.name):
         return None

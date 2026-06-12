@@ -112,6 +112,34 @@ class TestGroupAveraging:
         # ...while the noise calibration gets true single-frame data.
         assert float(np.mean(img.patches_single[0][0])) == 1000.0
 
+    def test_streaming_average_matches_stacked_mean(self, monkeypatch):
+        """The one-frame-at-a-time sum must reproduce np.mean over the stacked burst."""
+        import ctt.core.image_loader as loader_mod
+        from ctt.core.image import Image
+
+        rng = np.random.default_rng(42)
+        frames = [[rng.integers(0, 65536, (64, 64), dtype=np.uint16) for _ in range(4)] for _ in range(8)]
+        calls = iter(frames)
+
+        def fake_load(cam, im_str, demosaic=True):
+            img = Image()
+            img.channels = list(next(calls))
+            img.sigbits = 12
+            img.blacklevel_16 = 0
+            img.name = im_str.split('/')[-1]
+            return img
+
+        monkeypatch.setattr(loader_mod, 'dng_load_image', fake_load)
+        centres = np.array([[10 + c * 8, 10 + r * 8] for r in range(4) for c in range(6)], dtype=float)
+        corners = np.array([[10, 10], [50, 10], [50, 40], [10, 40]], dtype=float)
+        monkeypatch.setattr(loader_mod, 'find_macbeth', lambda cam, chan, cfg: (([corners], [centres]), 0.9))
+
+        cam = Camera('out.json', json={})
+        img = loader_mod.load_image_group(cam, [f'/x/a_5000k_800l_{i}.dng' for i in range(8)], (0, 0))
+        for i in range(4):
+            expected = np.mean([f[i] for f in frames], axis=0)
+            np.testing.assert_array_equal(img.channels[i], expected)
+
     def test_single_member_group_is_plain_load(self, tmp_path, monkeypatch):
         loader_mod = self._stub_loader(monkeypatch, [3000.0])
         cam = Camera('out.json', json={})
@@ -129,7 +157,7 @@ class TestAddImgsGrouping:
 
         group_calls = []
 
-        def fake_group(cam, paths, mac_config):
+        def fake_group(cam, paths, mac_config, demosaic=True):
             group_calls.append([p.split('/')[-1] for p in paths])
             return types.SimpleNamespace(macbeth_confidence=None, blacklevel_16=0, name='')
 
@@ -137,7 +165,7 @@ class TestAddImgsGrouping:
         monkeypatch.setattr(
             camera_mod,
             'load_image',
-            lambda cam, a, mac_config=None, mac=True: types.SimpleNamespace(blacklevel_16=0, name=''),
+            lambda cam, a, mac_config=None, mac=True, demosaic=True: types.SimpleNamespace(blacklevel_16=0, name=''),
         )
 
         cam = camera_mod.Camera('out.json', json={})

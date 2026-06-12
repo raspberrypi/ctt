@@ -154,7 +154,8 @@ class Camera:
             self.log += f'\n\nImage: {filename}'
             col, lux = get_col_lux(filename)
             if 'alsc' in filename:
-                img = load_image(self, address, mac=False)
+                # ALSC only consumes the raw channel statistics; skip the demosaic.
+                img = load_image(self, address, mac=False, demosaic=False)
                 self.log += '\nIdentified as an ALSC image'
                 if img is None:
                     logger.info(f'\nDISCARDED: {filename}')
@@ -207,7 +208,9 @@ class Camera:
                     self.log += '\nWARNING: Error reading colour temp/lux from filename'
                     self.log += '\nImage discarded!'
                     continue
-                img = load_image_group(self, [directory + f for f in group], mac_config)
+                # Chart detection and patch sampling work on the raw channels, and
+                # nothing downstream reads img.rgb for Macbeth images; skip the demosaic.
+                img = load_image_group(self, [directory + f for f in group], mac_config, demosaic=False)
                 if img is None:
                     logger.info(f'\t{filename}')
                     logger.error('\t\t✗ Macbeth chart not found in image')

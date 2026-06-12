@@ -6,9 +6,21 @@
 
 import numpy as np
 
-from ctt.algorithms.alsc import alsc_residuals
+from ctt.algorithms.alsc import alsc_residuals, get_grid
 
 GRID = (16, 12)
+
+
+def test_get_grid_uint16_matches_float_reference():
+    # Channels are stored as uint16; cell sums far exceed the uint16 range, so
+    # get_grid must accumulate in a wider dtype.
+    rng = np.random.default_rng(7)
+    chan = rng.integers(30000, 65536, (1232, 1640), dtype=np.uint16)
+    grid_w, grid_h = GRID
+    dx, dy = int((1640 - 1) // (grid_w - 1)), int((1232 - 1) // (grid_h - 1))
+    out = get_grid(chan, dx, dy, GRID)
+    ref = get_grid(chan.astype(np.float64), dx, dy, GRID)
+    np.testing.assert_allclose(out, ref)
 
 
 def _vignetted(corner_level: float) -> np.ndarray:

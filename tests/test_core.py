@@ -177,7 +177,9 @@ class TestAddImgsImageFilter:
             (tmp_path / n).write_bytes(b'DNG')
         # Stub the DNG loader: add_imgs only needs an object it can tag and append.
         monkeypatch.setattr(
-            camera_mod, 'load_image', lambda cam, address, mac_config=None, mac=True: types.SimpleNamespace()
+            camera_mod,
+            'load_image',
+            lambda cam, address, mac_config=None, mac=True, demosaic=True: types.SimpleNamespace(),
         )
         return camera_mod.Camera('out.json', json={})
 

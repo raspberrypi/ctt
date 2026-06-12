@@ -4,7 +4,31 @@
 
 import numpy as np
 
+from ctt.core.image import Image
+from ctt.detection.patches import get_alsc_patches
 from ctt.detection.ransac import get_square_centres, get_square_verts
+
+
+class TestGetAlscPatches:
+    def test_uint16_patches_promote_before_arithmetic(self):
+        """Channels are stored as uint16: the black-level subtraction must not
+        wrap below black, nor the two-green sum overflow before halving."""
+        img = Image()
+        img.col = 5000
+        img.blacklevel_16 = 4096
+        img.cen_coords = list(range(24))
+        # 24 patches of 4 pixels per channel: reds sit below black level,
+        # greens are bright enough that their sum exceeds the uint16 range.
+        img.patches = [
+            [np.full(4, 2000, dtype=np.uint16)] * 24,  # R: below black
+            [np.full(4, 60000, dtype=np.uint16)] * 24,  # G1
+            [np.full(4, 60000, dtype=np.uint16)] * 24,  # G2
+            [np.full(4, 2000, dtype=np.uint16)] * 24,  # B: below black
+        ]
+        r, b, g = get_alsc_patches(img, None, grey=False)
+        assert np.all(r == 2000 - 4096)
+        assert np.all(b == 2000 - 4096)
+        assert np.all(g == 60000 - 4096)
 
 
 class TestGetSquareVerts:
