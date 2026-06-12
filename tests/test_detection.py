@@ -5,8 +5,24 @@
 import numpy as np
 
 from ctt.core.image import Image
+from ctt.core.image_loader import apply_gamma
 from ctt.detection.patches import get_alsc_patches
 from ctt.detection.ransac import get_square_centres, get_square_verts
+
+
+class TestDetectionGamma:
+    def test_fixed_curve_endpoints_and_monotonic(self):
+        x = np.linspace(0, 1, 1001)
+        y = apply_gamma(x)
+        assert y[0] == 0.0 and abs(y[-1] - 1.0) < 1e-9
+        assert np.all(np.diff(y) >= 0)
+        # Mid-tone lift is what makes the chart detectable; guard against the
+        # curve accidentally regressing towards linear.
+        assert apply_gamma(np.array([0.25]))[0] > 0.55
+
+    def test_out_of_range_input_clipped(self):
+        y = apply_gamma(np.array([-0.5, 1.5]))
+        assert y[0] == 0.0 and abs(y[1] - 1.0) < 1e-9
 
 
 class TestGetAlscPatches:
