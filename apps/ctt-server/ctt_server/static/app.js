@@ -168,8 +168,8 @@ function captureApp(cfg) {
     counts: { macbeth: 0, alsc: 0, cac: 0, dark: 0 },
     form: { image_type: 'macbeth', colour_temp: 6500, lux: 1000, frames: 1 },
     controls: { exposure: 10000, gain: 1.0, auto_exposure: true, colour_temp: 0, lux: 0, ev: 0 },
-    fpsTarget: 30,  // framerate target; 0 = unconstrained (variable frame duration)
-    camera: { model: '', resolution: null },
+    fpsTarget: 0,  // framerate target; 0 = unconstrained — set by loadControls or user
+    camera: { model: '', resolution: null, modes: [] },
     metered: { exposure: 0, gain: 0, colour_temp: 0, lux: 0, focus_fom: 0 },
     clip: { r: 0, g: 0, b: 0 },
     macbeth: { found: false, confidence: null, corners: null, small: false, saturated: false },
@@ -179,6 +179,8 @@ function captureApp(cfg) {
     hflip: false,
     vflip: false,
     previewTick: 0,  // bumped to reconnect the MJPEG <img> after a camera reconfigure
+    cameras: [],     // list of all cameras detected on the server
+    cameraNum: 0,    // currently selected camera index
 
     async init() {
       this.updateCounts();
@@ -189,8 +191,11 @@ function captureApp(cfg) {
         const r = await fetch('/api/health');
         const h = await r.json();
         this.connected = !!h.camera;
+        if (h.cameras) this.cameras = h.cameras;
+        this.cameraNum = h.camera_num || 0;
         if (h.model) this.camera.model = h.model;
         if (h.resolution) this.camera.resolution = h.resolution;
+        if (h.modes) this.camera.modes = h.modes;
         if (h.controls) this.metered = h.controls;
       } catch (e) {
         this.connected = false;
@@ -202,7 +207,7 @@ function captureApp(cfg) {
         try { await fetch('/api/preview-default', { method: 'POST' }); } catch (e) { /* best effort */ }
         // The reload reset the sensor flip; re-enforce the stored choice.
         if (this.hflip || this.vflip) await this.applyTransform();
-        this.loadControls();
+        await this.loadControls();
         this.pollHistogram();
       }
     },
@@ -217,6 +222,46 @@ function captureApp(cfg) {
         });
         this.previewTick = Date.now();  // force the MJPEG <img> to reopen on the reconfigured camera
       } catch (e) { this.error = 'Failed to set flip'; }
+    },
+
+    async switchCamera(num) {
+      this.busy = true; this.error = '';
+      try {
+        const r = await fetch('/api/camera', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ camera_num: Number(num) }),
+        });
+        const h = await r.json();
+        if (!h.camera) { this.error = h.error || 'Failed to switch camera'; return; }
+        this.connected = true;
+        this.cameraNum = h.camera_num || 0;
+        this.camera.model = h.model || '';
+        this.camera.resolution = h.resolution;
+        if (h.modes) this.camera.modes = h.modes;
+        if (h.controls) this.metered = h.controls;
+        this.previewTick = Date.now();  // force the MJPEG <img> to reopen on the new camera
+        // Re-assert the stored flip choice on the new camera.
+        if (this.hflip || this.vflip) await this.applyTransform();
+        await this.loadControls();
+      } catch (e) { this.error = 'Failed to switch camera'; }
+      finally { this.busy = false; }
+    },
+
+    async switchMode(width, height) {
+      this.busy = true; this.error = '';
+      try {
+        const r = await fetch('/api/mode', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ width: Number(width), height: Number(height) }),
+        });
+        const h = await r.json();
+        if (!h.resolution) { this.error = h.error || 'Failed to set mode'; return; }
+        this.camera.resolution = h.resolution;
+        if (h.modes) this.camera.modes = h.modes;
+        this.previewTick = Date.now();  // force the MJPEG <img> to reopen on the new mode
+        await this.loadControls();  // controls may change with mode (frame rate limits etc.)
+      } catch (e) { this.error = 'Failed to switch sensor mode'; }
+      finally { this.busy = false; }
     },
 
     async loadLightbox() {
@@ -765,7 +810,7 @@ function resultsApp(cfg) {
     camera: {},           // preview page: {model, resolution} for the live sensor-info box
     metered: { exposure: 0, gain: 0, colour_temp: 0, lux: 0 },  // live metered values
     controls: { auto_exposure: true, exposure: 0, gain: 1, ev: 0 },  // exposure panel state
-    fpsTarget: 30,  // framerate target; 0 = unconstrained (variable frame duration)
+    fpsTarget: 0,  // framerate target; 0 = unconstrained — set by loadControls or user
     lightbox: { present: false, channel: null, intensity: 0, illuminants: {} },  // optional lightbox device
     colour: null,         // current live ΔE reading (for whichever tuning is loaded)
     liveColour: true,     // semi-live colour measurement while previewing

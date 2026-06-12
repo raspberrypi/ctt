@@ -430,4 +430,4 @@ td.mono { font-family: var(--mono); }
 }
 
 /* sensor-mode dropdown in the preview info box */
-.caminfo .mode-sel { width: auto; padding: 3px 8px; font-size: 0.85rem; align-self: flex-start; }
+.caminfo .mode-sel { width: auto; max-width: 100%; padding: 3px 8px; font-size: 0.85rem; align-self: flex-start; }

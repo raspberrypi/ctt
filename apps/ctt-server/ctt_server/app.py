@@ -34,6 +34,7 @@ from .camera import (
     MJPEG_CONTENT_TYPE,
     CameraError,
     get_shared_camera,
+    list_cameras,
     platform_target,
     reload_shared_camera,
 )
@@ -239,7 +240,30 @@ def create_app(workspace_root: str | None = None) -> Flask:
     @app.route('/api/health')
     def api_health():
         try:
-            return jsonify({'camera': True, **get_shared_camera().health()})
+            cam = get_shared_camera()
+            return jsonify({
+                'camera': True,
+                'cameras': list_cameras(),
+                **cam.health(),
+            })
+        except CameraError as err:
+            return jsonify({'camera': False, 'error': str(err)}), 503
+
+    @app.route('/api/cameras')
+    def api_cameras():
+        return jsonify(list_cameras())
+
+    @app.route('/api/camera', methods=['POST'])
+    def api_switch_camera():
+        """Switch to a different camera by its index number."""
+        body = request.get_json(force=True) or {}
+        try:
+            camera_num = int(body['camera_num'])
+        except (KeyError, TypeError, ValueError):
+            return jsonify({'error': 'camera_num (int) is required'}), 400
+        try:
+            cam = get_shared_camera(camera_num=camera_num)
+            return jsonify({'camera': True, **cam.health()})
         except CameraError as err:
             return jsonify({'camera': False, 'error': str(err)}), 503
 

@@ -50,7 +50,9 @@ class Picamera2Camera:
     viewfinder's field of view is exactly what the captured DNG covers.
     """
 
-    def __init__(self, preview_max_width: int = 1920, tuning_file: str | None = None) -> None:
+    def __init__(
+        self, preview_max_width: int = 1920, tuning_file: str | None = None, camera_num: int = 0
+    ) -> None:
         try:
             from picamera2 import Picamera2  # noqa: PLC0415 (lazy import)
         except ImportError as err:  # pragma: no cover - depends on Pi environment
@@ -64,19 +66,20 @@ class Picamera2Camera:
             Picamera2.set_logging(logging.WARNING)  # quieten Picamera2's own INFO chatter (once)
             _picamera2_logging_quieted = True
 
+        self.camera_num = camera_num
         self._lock = threading.Lock()
         self._ev = 0.0  # exposure compensation (EV); tracked here as metadata may omit it
         self._auto = True  # AeEnable state; tracked so we report it reliably (AeLocked is ambiguous)
-        self._fps = 30.0  # framerate target; 0 = unconstrained (variable frame duration)
+        self._fps = 0.0  # framerate target; 0 = unconstrained — set by _apply_mode or user
         # Optionally start the pipeline with a specific tuning file (e.g. a freshly
         # generated CTT tuning, for the Results-page live preview test). None = the
         # camera's built-in default tuning.
         self.tuning_file = tuning_file
         if tuning_file:
             tuning = Picamera2.load_tuning_file(os.path.basename(tuning_file), dir=os.path.dirname(tuning_file))
-            self._picam2 = Picamera2(tuning=tuning)
+            self._picam2 = Picamera2(tuning=tuning, camera_num=camera_num)
         else:
-            self._picam2 = Picamera2()
+            self._picam2 = Picamera2(camera_num=camera_num)
         try:
             self.model = self._picam2.camera_properties.get('Model', 'unknown')
             # Advertised sensor modes, one entry per raw size (preferring the deeper
@@ -133,6 +136,11 @@ class Picamera2Camera:
         prev_w = min(self._preview_max_width, w) & ~1
         prev_h = int(round(prev_w * h / w)) & ~1
         self._preview_size = (prev_w, prev_h)
+        # Adopt the mode's maximum framerate so the user starts at the best
+        # rate for the new resolution, not a stale target from a prior mode.
+        mode_fps = mode.get('fps', 0)
+        if mode_fps:
+            self._fps = mode_fps
 
     def _sensor_config(self) -> dict:
         # sensor= pins the actual camera mode (readout/binning) so libcamera
@@ -479,6 +487,7 @@ class Picamera2Camera:
 
     def health(self) -> dict:
         return {
+            'camera_num': self.camera_num,
             'model': self.model,
             'resolution': list(self.resolution),
             'modes': [
@@ -504,18 +513,49 @@ _SHARED: Picamera2Camera | None = None
 _SHARED_LOCK = threading.Lock()
 
 
-def get_shared_camera() -> Picamera2Camera:
-    """Return a process-wide singleton camera (one Picamera2 per process)."""
+def get_shared_camera(camera_num: int | None = None) -> Picamera2Camera:
+    """Return a process-wide singleton camera (one Picamera2 per process).
+
+    When *camera_num* is given and differs from the currently open camera, the
+    current camera is closed and reopened on the requested index.  When
+    *camera_num* is None the current camera is returned unchanged (or the first
+    available camera on the first call).
+    """
     global _SHARED
     with _SHARED_LOCK:
+        if camera_num is not None and _SHARED is not None and _SHARED.camera_num != camera_num:
+            _SHARED.close()
+            _SHARED = None
         if _SHARED is None:
             try:
-                _SHARED = Picamera2Camera()
+                _SHARED = Picamera2Camera(camera_num=camera_num or 0)
             except CameraError:
                 raise
             except Exception as err:
                 raise CameraError(f'Failed to start the camera: {err}') from err
         return _SHARED
+
+
+def list_cameras() -> list[dict]:
+    """Return every camera detected by libcamera on this Pi.
+
+    Each entry has ``num``, ``model``, ``id``, ``location`` and ``rotation``
+    fields, suitable for the UI camera selector.
+    """
+    try:
+        from picamera2 import Picamera2  # noqa: PLC0415
+    except ImportError:
+        return []
+    return [
+        {
+            'num': c['Num'],
+            'model': c.get('Model', 'unknown'),
+            'id': c.get('Id', ''),
+            'location': c.get('Location', 0),
+            'rotation': c.get('Rotation', 0),
+        }
+        for c in Picamera2.global_camera_info()
+    ]
 
 
 def validate_tuning_file(path: str, timeout: float = 60.0) -> None:
@@ -559,7 +599,8 @@ def validate_tuning_file(path: str, timeout: float = 60.0) -> None:
 
 
 def reload_shared_camera(
-    tuning_file: str | None = None, preview_max_width: int = 1920, validate: bool = False
+    tuning_file: str | None = None, preview_max_width: int = 1920,
+    validate: bool = False, camera_num: int | None = None,
 ) -> Picamera2Camera:
     """Restart the shared camera with a given tuning file (None = default tuning).
 
@@ -568,24 +609,34 @@ def reload_shared_camera(
     capture page's "restore default" call cheap. validate=True canary-tests the
     tuning in a subprocess first (see validate_tuning_file) — use it for any
     tuning that isn't known-good, e.g. hand-edited custom files.
+
+    When *camera_num* is given, also switches to that camera index.
     """
     global _SHARED
     with _SHARED_LOCK:
+        if camera_num is not None and _SHARED is not None and _SHARED.camera_num != camera_num:
+            _SHARED.close()
+            _SHARED = None
         if _SHARED is not None and _SHARED.tuning_file == tuning_file:
             return _SHARED
         if _SHARED is not None:
             _SHARED.close()
             _SHARED = None
+        target_num = camera_num if camera_num is not None else 0
         try:
             if validate and tuning_file is not None:
                 validate_tuning_file(tuning_file)
-            _SHARED = Picamera2Camera(preview_max_width=preview_max_width, tuning_file=tuning_file)
+            _SHARED = Picamera2Camera(
+                preview_max_width=preview_max_width, tuning_file=tuning_file, camera_num=target_num,
+            )
         except Exception as err:
             # The requested tuning failed to load: reopen with the default
             # tuning so the camera isn't left dead, then report.
             if tuning_file is not None:
                 with contextlib.suppress(Exception):
-                    _SHARED = Picamera2Camera(preview_max_width=preview_max_width)
+                    _SHARED = Picamera2Camera(
+                        preview_max_width=preview_max_width, camera_num=target_num,
+                    )
             if isinstance(err, CameraError):
                 raise
             tuning_name = os.path.basename(tuning_file) if tuning_file else 'the default tuning'

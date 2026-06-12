@@ -37,9 +37,29 @@
         </div>
       </div>
       <div class="caminfo" x-show="connected" x-cloak>
-        <div class="caminfo-row" style="grid-template-columns: repeat(5, 1fr)">
+        <div class="caminfo-row" style="grid-template-columns: repeat(6, 1fr)">
+          <div>
+            <span class="k">Camera</span>
+            <select class="mode-sel" x-show="cameras.length > 1" @change="switchCamera($event.target.value)">
+              <template x-for="c in cameras" :key="c.num">
+                <option :value="c.num" :selected="c.num === cameraNum"
+                        x-text="c.num + ' · ' + c.model"></option>
+              </template>
+            </select>
+            <span class="v" x-show="!(cameras.length > 1)" x-text="camera.model || '—'"></span>
+          </div>
           <div><span class="k">Sensor</span><span class="v" x-text="camera.model || '—'"></span></div>
-          <div><span class="k">Resolution</span><span class="v" x-text="camera.resolution ? camera.resolution[0] + ' × ' + camera.resolution[1] : '—'"></span></div>
+          <div style="grid-column: span 2">
+            <span class="k">Resolution</span>
+            <select class="mode-sel" x-show="camera.modes.length > 1" @change="switchMode($event.target.value.split('x')[0], $event.target.value.split('x')[1])">
+              <template x-for="m in camera.modes" :key="m.size[0] + 'x' + m.size[1]">
+                <option :value="m.size[0] + 'x' + m.size[1]"
+                        :selected="camera.resolution && m.size[0] === camera.resolution[0] && m.size[1] === camera.resolution[1]"
+                        x-text="m.size[0] + ' × ' + m.size[1] + ' · ' + m.bit_depth + '‑bit · ' + m.fps.toFixed(0) + ' fps'"></option>
+              </template>
+            </select>
+            <span class="v" x-show="!(camera.modes.length > 1)" x-text="camera.resolution ? camera.resolution[0] + ' × ' + camera.resolution[1] : '—'"></span>
+          </div>
           <div>
             <span class="k">Flips</span>
             <div class="seg compact" style="align-self:flex-start">
