@@ -418,3 +418,13 @@ td.mono { font-family: var(--mono); }
 .seg button { border: none; background: transparent; color: var(--text-dim); padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600; font-size: 0.85rem; }
 .seg button.active { background: var(--accent); color: #fff; }
 .seg.compact button { padding: 3px 9px; font-size: 0.78rem; }
+
+/* unachievable FPS target indicator (capture + preview info boxes) */
+.fps-warn {
+  color: var(--warn);
+  font-weight: 800;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: help;
+  text-transform: none;
+}
