@@ -306,7 +306,8 @@ def get_grid(chan: np.ndarray, dx: int, dy: int, grid_size: tuple[int, int]) -> 
     row_edges = np.arange(grid_h) * dy
     col_edges = np.arange(grid_w) * dx
     # reduceat sums contiguous blocks between edges; the last block extends to the array boundary.
-    cell_sums = np.add.reduceat(np.add.reduceat(chan, row_edges, axis=0), col_edges, axis=1)
+    # Accumulate in int64: the channels are stored as uint16 and a cell sum would overflow.
+    cell_sums = np.add.reduceat(np.add.reduceat(chan, row_edges, axis=0, dtype=np.int64), col_edges, axis=1)
     row_sizes = np.diff(np.append(row_edges, h_total))
     col_sizes = np.diff(np.append(col_edges, w_total))
     cell_counts = row_sizes[:, np.newaxis] * col_sizes[np.newaxis, :]

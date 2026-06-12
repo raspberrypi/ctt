@@ -23,17 +23,26 @@ def get_alsc_patches(
     If grey then only greyscale patches (every 4th) are considered.
     """
     grid_w, grid_h = grid_size
+
+    def _patches(i):
+        # Channels (and so patches) are stored as uint16; promote so the black-level
+        # subtraction and green-channel sum below can't wrap. Keep int64 rather than
+        # float so single-image values truncate exactly as they always have
+        # (burst-averaged patches arrive as float64 and pass through unchanged).
+        arr = np.array(img.patches[i])
+        return arr.astype(np.int64) if arr.dtype.kind in 'ui' else arr
+
     if grey:
         cen_coords = img.cen_coords[3::4]
         col = img.col
-        patches = [np.array(img.patches[i]) for i in img.order]
+        patches = [_patches(i) for i in img.order]
         r_patches = patches[0][3::4] - img.blacklevel_16
         b_patches = patches[3][3::4] - img.blacklevel_16
         g_patches = (patches[1][3::4] + patches[2][3::4]) / 2 - img.blacklevel_16  # Two green chans averaged
     else:
         cen_coords = img.cen_coords
         col = img.col
-        patches = [np.array(img.patches[i]) for i in img.order]
+        patches = [_patches(i) for i in img.order]
         r_patches = patches[0] - img.blacklevel_16
         b_patches = patches[3] - img.blacklevel_16
         g_patches = (patches[1] + patches[2]) / 2 - img.blacklevel_16
