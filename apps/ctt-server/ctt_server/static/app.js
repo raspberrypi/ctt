@@ -224,7 +224,10 @@ function captureApp(cfg) {
         const r = await fetch('/api/lightbox');
         if (!r.ok) return;
         const lb = await r.json();
-        const ch = lb.channel;  // capture before mutating: lb IS this.lightbox below
+        let ch = lb.channel;  // capture before mutating: lb IS this.lightbox below
+        // A fresh device reports channel 0 (nothing selected yet); snap to the
+        // first illuminant so the model matches what the dropdown renders.
+        if (lb.present && lb.illuminants && lb.illuminants[ch] == null) ch = Number(Object.keys(lb.illuminants)[0]);
         this.lightbox = lb;
         if (lb.present && ch != null) {
           // Re-assert the active channel once the <select>'s x-for <option>s exist:
@@ -939,7 +942,10 @@ function resultsApp(cfg) {
         const r = await fetch('/api/lightbox');
         if (!r.ok) return;
         const lb = await r.json();
-        const ch = lb.channel;  // capture before mutating: lb IS this.lightbox below
+        let ch = lb.channel;  // capture before mutating: lb IS this.lightbox below
+        // A fresh device reports channel 0 (nothing selected yet); snap to the
+        // first illuminant so the model matches what the dropdown renders.
+        if (lb.present && lb.illuminants && lb.illuminants[ch] == null) ch = Number(Object.keys(lb.illuminants)[0]);
         this.lightbox = lb;
         if (lb.present && ch != null) {
           // Re-assert the active channel once the <select>'s x-for options exist

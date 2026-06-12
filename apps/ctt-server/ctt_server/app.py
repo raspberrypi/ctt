@@ -364,7 +364,10 @@ def create_app(workspace_root: str | None = None) -> Flask:
             elif target is not None:
                 box.set_illuminant(target, percent)
             elif percent is not None:
-                box.set_illuminant(box.get_state().channel, percent)
+                state = box.get_state()
+                if state.illuminant is None:  # fresh device: channel 0, nothing selected yet
+                    return jsonify({'error': 'No illuminant is active — select one first.'}), 400
+                box.set_illuminant(state.channel, percent)
         except (LightboxError, TypeError, ValueError) as err:
             return jsonify({'error': str(err)}), 400
         return jsonify(lightbox_status())
