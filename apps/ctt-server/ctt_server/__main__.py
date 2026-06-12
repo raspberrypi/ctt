@@ -52,11 +52,9 @@ def _ssl_context(args):
     if args.cert and args.key:
         return (args.cert, args.key)
 
-    from pathlib import Path
+    from .sessions import resolve_workspace
 
-    from .sessions import default_workspace
-
-    ws = Path(args.workspace) if args.workspace else default_workspace()
+    ws = resolve_workspace(args.workspace)
     tls = ws / '.tls'
     tls.mkdir(parents=True, exist_ok=True)
     cert, key = tls / 'cert.pem', tls / 'key.pem'

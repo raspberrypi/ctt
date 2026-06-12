@@ -37,6 +37,18 @@ def default_workspace() -> Path:
     return root
 
 
+def resolve_workspace(root: str | Path | None = None) -> Path:
+    """Resolve the workspace root (or its default) to an absolute path.
+
+    Relative paths resolve against the cwd at startup. This matters because
+    Flask's send_file resolves relative paths against the app root rather than
+    the cwd, so a relative workspace would otherwise capture to one directory
+    and serve from another.
+    """
+    path = Path(root) if root else default_workspace()
+    return path.expanduser().resolve()
+
+
 def _safe_project_name(name: str) -> str:
     clean = re.sub(r'[^A-Za-z0-9._-]', '_', name.strip())
     clean = clean.strip('._-')
@@ -217,7 +229,7 @@ class Workspace:
     """Container for projects under a workspace root directory."""
 
     def __init__(self, root: str | Path | None = None) -> None:
-        self.root = Path(root) if root else default_workspace()
+        self.root = resolve_workspace(root)
         self.root.mkdir(parents=True, exist_ok=True)
 
     def list_projects(self) -> list[Project]:
