@@ -282,6 +282,25 @@ class Picamera2Camera:
             raise CameraError('Failed to encode PNG')
         return buf.tobytes()
 
+    def capture_preview_png(self) -> bytes:
+        """Snapshot the current live preview frame as a PNG (zero shutter lag).
+
+        Grabs the running main stream straight from the pipeline — no mode switch —
+        so the snapshot is exactly the frame on screen, at the selected mode's preview
+        resolution, with the manual exposure/gain (and the ISP denoise state) left
+        untouched. Switching to a full-resolution still mode (capture_png) reverts
+        auto-exposure and steps the live preview's brightness, which is why the
+        on-screen snapshot avoids it.
+        """
+        import cv2  # noqa: PLC0415
+
+        with self._lock:
+            arr = self._picam2.capture_array('main')  # RGB888 == BGR-ordered == cv2 native
+        ok, buf = cv2.imencode('.png', arr)
+        if not ok:
+            raise CameraError('Failed to encode PNG')
+        return buf.tobytes()
+
     def mjpeg_frames(self, fps: float = 10.0):
         """Yield multipart MJPEG chunks for a streaming HTTP response."""
         period = 1.0 / max(fps, 1.0)
