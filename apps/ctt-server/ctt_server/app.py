@@ -343,11 +343,15 @@ def create_app(workspace_root: str | None = None) -> Flask:
 
     @app.route('/projects/<name>/preview-capture')
     def preview_capture(name: str):
-        """Download a full-resolution PNG still from the live preview camera."""
+        """Download a PNG snapshot of the live preview (zero shutter lag).
+
+        Grabs the frame currently on screen at the selected mode's preview
+        resolution, so manual exposure/gain is preserved (no mode-switch blip).
+        """
         proj = get_project_or_404(name)
         cam = camera_or_503()
         try:
-            png = cam.capture_png()
+            png = cam.capture_preview_png()
         except CameraError as err:
             abort(503, str(err))
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
