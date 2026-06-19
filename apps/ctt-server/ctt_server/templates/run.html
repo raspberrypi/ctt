@@ -5,7 +5,7 @@
 {% include '_project_tabs.html' %}
 <p class="muted" style="margin:-12px 0 20px">{{ counts.macbeth }} Macbeth · {{ counts.alsc }} ALSC · {{ counts.cac }} CAC · {{ counts.dark }} dark images{% if excluded_count %} · <span style="color:var(--warn)">{{ excluded_count }} excluded</span>{% endif %}</p>
 
-<div class="grid" x-data='runApp({ project: {{ project.name|tojson }} })'>
+<div class="grid" style="grid-template-columns: 1fr 1fr; align-items: start" x-data='runApp({ project: {{ project.name|tojson }} })'>
   <div class="card">
     <div class="card-head"><h2>Options</h2></div>
 
@@ -28,88 +28,127 @@
       </div>
     </div>
 
+    <label class="check">
+      <input type="checkbox" x-model="update"> Update existing tuning (keep sections not re-calibrated)
+    </label>
+    <div x-show="update" x-cloak>
+      <div class="field">
+        <label>Existing tuning</label>
+        <div class="seg">
+          <button type="button" :class="{active: updateSource==='project'}" @click="updateSource='project'">Project tuning</button>
+          <button type="button" :class="{active: updateSource==='system'}" @click="updateSource='system'; loadSystemTunings()">System tuning</button>
+          <button type="button" :class="{active: updateSource==='upload'}" @click="updateSource='upload'">Upload file</button>
+        </div>
+      </div>
+      <div class="field" x-show="updateSource==='system'" x-cloak>
+        <label>System tuning file</label>
+        <select x-model="systemTuning" x-show="systemTunings.length">
+          <template x-for="f in systemTunings" :key="f.path">
+            <option :value="f.path" x-text="f.name"></option>
+          </template>
+        </select>
+        <div class="hint" x-show="systemTunings.length">Using <span x-text="systemTuning"></span></div>
+        <div class="hint" x-show="!systemTunings.length" x-text="systemError || 'Looking for installed tuning files…'"></div>
+      </div>
+      <div class="field" x-show="updateSource==='upload'" x-cloak>
+        <label>Tuning file (.json)</label>
+        <input type="file" accept=".json,application/json" x-ref="updateFile" @change="updateFile = $event.target.files[0] || null">
+        <div class="hint">The target (PiSP/VC4) is detected from the file; the run is restricted to it.</div>
+      </div>
+      <div class="hint">Only the sections selected by <b>Mode</b> are re-calibrated and replaced; all other sections are preserved from the existing file. In <b>Full</b> mode every section is regenerated (seeded from the existing file).</div>
+    </div>
+
+    <div class="divider"></div>
+    <h3>Black level</h3>
     <div class="field">
-      <label>Black level (-1 auto)</label>
+      <label>Level (-1 = auto)</label>
       <input type="number" x-model.number="blacklevel" min="-1" max="65535" step="1">
       <div class="hint" x-show="blSeed !== null" x-cloak>
         Measured <span x-text="blSeed"></span> from <span x-text="blFrames"></span> dark frame(s).
       </div>
     </div>
 
-    <div class="divider"></div>
-    <h3>AWB &amp; CCM</h3>
+    <!-- AWB & CCM: only when AWB/CCM are calibrated (full or colour-only). -->
+    <div x-show="mode==='full' || mode==='colour-only'" x-cloak>
+      <div class="divider"></div>
+      <h3>AWB &amp; CCM</h3>
 
-    <label class="flex" style="margin:10px 0 12px;font-weight:600">
-      <input type="checkbox" style="width:auto" x-model="greyworld"> Grey-world AWB (instead of Macbeth-based)
-    </label>
-    <div class="field">
-      <label>CCM optimisation</label>
-      <div class="seg">
-        <button type="button" :class="{active: matrixSelection==='average'}" @click="matrixSelection='average'">Average ΔE</button>
-        <button type="button" :class="{active: matrixSelection==='maximum'}" @click="matrixSelection='maximum'">Worst ΔE</button>
-        <button type="button" :class="{active: matrixSelection==='patches'}" @click="matrixSelection='patches'">Patches</button>
-      </div>
-      <div class="hint">What the colour matrix minimises: average across all patches (default), the single worst patch, or a chosen subset.</div>
-    </div>
-    <div class="field" x-show="matrixSelection==='patches'" x-cloak>
-      <label>Test patches (1–24, comma-separated)</label>
-      <input type="text" x-model="testPatches" placeholder="1,2,5,8,9,12,14">
-    </div>
-
-    <div class="divider"></div>
-    <h3>ALSC (lens shading)</h3>
-
-    <label class="flex" style="margin:10px 0 12px;font-weight:600">
-      <input type="checkbox" style="width:auto" x-model="doAlscColour"> ALSC colour shading
-    </label>
-    <div class="field-row">
+      <label class="check">
+        <input type="checkbox" x-model="greyworld"> Grey-world AWB (instead of Macbeth-based)
+      </label>
       <div class="field">
-        <label>Luminance strength</label>
-        <input type="number" x-model.number="luminanceStrength" min="0" max="1" step="0.05">
+        <label>CCM optimisation</label>
+        <div class="seg">
+          <button type="button" :class="{active: matrixSelection==='average'}" @click="matrixSelection='average'">Average ΔE</button>
+          <button type="button" :class="{active: matrixSelection==='maximum'}" @click="matrixSelection='maximum'">Worst ΔE</button>
+          <button type="button" :class="{active: matrixSelection==='patches'}" @click="matrixSelection='patches'">Patches</button>
+        </div>
+        <div class="hint">What the colour matrix minimises: average across all patches (default), the single worst patch, or a chosen subset.</div>
       </div>
+      <div class="field" x-show="matrixSelection==='patches'" x-cloak>
+        <label>Test patches (1–24, comma-separated)</label>
+        <input type="text" x-model="testPatches" placeholder="1,2,5,8,9,12,14">
+      </div>
+    </div>
+
+    <!-- ALSC: only when lens shading is calibrated (full or alsc-only). -->
+    <div x-show="mode==='full' || mode==='alsc-only'" x-cloak>
+      <div class="divider"></div>
+      <h3>ALSC (lens shading)</h3>
+
+      <label class="check">
+        <input type="checkbox" x-model="doAlscColour"> ALSC colour shading
+      </label>
+      <div class="field-row">
+        <div class="field">
+          <label>Luminance strength</label>
+          <input type="number" x-model.number="luminanceStrength" min="0" max="1" step="0.05">
+        </div>
+        <div class="field">
+          <label>Max gain</label>
+          <input type="number" x-model.number="maxGain" min="1" max="16" step="0.5">
+        </div>
+      </div>
+    </div>
+
+    <!-- Lux: calibrated only in a full run. -->
+    <div x-show="mode==='full'" x-cloak>
+      <div class="divider"></div>
+      <h3>Lux</h3>
       <div class="field">
-        <label>Max gain</label>
-        <input type="number" x-model.number="maxGain" min="1" max="16" step="0.5">
+        <label>Reference</label>
+        <div class="seg">
+          <button type="button" :class="{active: luxMode==='single'}" @click="luxMode='single'">Single capture</button>
+          <button type="button" :class="{active: luxMode==='average'}" @click="luxMode='average'">Robust average</button>
+        </div>
+      </div>
+      <div class="field" x-show="luxMode==='single'" x-cloak>
+        <label>Anchor lux</label>
+        <input type="number" x-model.number="luxAnchor" min="1" step="50" placeholder="1000">
+        <div class="hint">Anchors the lux calibration on the single capture closest to this lux level (default 1000).</div>
+      </div>
+      <div class="field" x-show="luxMode==='average'" x-cloak>
+        <label>Method</label>
+        <div class="seg">
+          <button type="button" :class="{active: luxMethod==='trimmed-mean'}" @click="luxMethod='trimmed-mean'">Trimmed mean</button>
+          <button type="button" :class="{active: luxMethod==='median'}" @click="luxMethod='median'">Median</button>
+        </div>
+        <div class="hint"><b>Robust average</b> of luminance-per-lux across all captures — less hostage to any one image. <b>Median</b> resists a cluster of similar captures (e.g. several of one illuminant) better than the trimmed mean; both spread per-illuminant error across the set.</div>
       </div>
     </div>
 
-    <div class="divider"></div>
-    <h3>Lux</h3>
-    <div class="field">
-      <label>Reference</label>
-      <div class="seg">
-        <button type="button" :class="{active: luxMode==='single'}" @click="luxMode='single'">Single capture</button>
-        <button type="button" :class="{active: luxMode==='average'}" @click="luxMode='average'">Robust average</button>
-      </div>
-    </div>
-    <div class="field" x-show="luxMode==='single'" x-cloak>
-      <label>Anchor lux</label>
-      <input type="number" x-model.number="luxAnchor" min="1" step="50" placeholder="1000">
-      <div class="hint">Anchors the lux calibration on the single capture closest to this lux level (default 1000).</div>
-    </div>
-    <div class="field" x-show="luxMode==='average'" x-cloak>
-      <label>Method</label>
-      <div class="seg">
-        <button type="button" :class="{active: luxMethod==='trimmed-mean'}" @click="luxMethod='trimmed-mean'">Trimmed mean</button>
-        <button type="button" :class="{active: luxMethod==='median'}" @click="luxMethod='median'">Median</button>
-      </div>
-      <div class="hint"><b>Robust average</b> of luminance-per-lux across all captures — less hostage to any one image. <b>Median</b> resists a cluster of similar captures (e.g. several of one illuminant) better than the trimmed mean; both spread per-illuminant error across the set.</div>
-    </div>
-
-    <div class="divider"></div>
-    <div class="btn-row mt">
-      <button class="btn primary" :disabled="running" @click="start()">
-        <span x-text="running ? 'Running…' : '▶ Run calibration'"></span>
-      </button>
-      <button class="btn ghost" x-show="done" @click="window.location='{{ url_for('results_page', name=project.name) }}'">View results &rarr;</button>
-    </div>
   </div>
 
   <div class="card">
     <div class="card-head">
-      <h2>Console</h2>
-      <span class="chip" x-show="exitCode!==null" :class="exitCode===0 ? 'cac' : ''"
-            x-text="exitCode===0 ? 'completed' : 'exit '+exitCode" x-cloak></span>
+      <button class="btn primary" :disabled="running" @click="start()">
+        <span x-text="running ? 'Running…' : '▶ Run calibration'"></span>
+      </button>
+      <div class="btn-row" style="align-items:center">
+        <span class="chip" x-show="exitCode!==null" :class="exitCode===0 ? 'cac' : ''"
+              x-text="exitCode===0 ? 'completed' : 'exit '+exitCode" x-cloak></span>
+        <button class="btn ghost" x-show="done" @click="window.location='{{ url_for('results_page', name=project.name) }}'">View results &rarr;</button>
+      </div>
     </div>
     <div class="console" id="console" x-ref="console"></div>
   </div>

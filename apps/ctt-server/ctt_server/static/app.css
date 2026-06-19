@@ -342,7 +342,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .console {
   background: #0a0d12; border: 1px solid var(--border); border-radius: var(--radius);
   font-family: var(--mono); font-size: 0.82rem; line-height: 1.5;
-  padding: 16px; height: 460px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+  padding: 16px; height: 800px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
 }
 .console .ln { display: block; }
 .console .ok { color: var(--ok); }
@@ -394,6 +394,10 @@ td.mono { font-family: var(--mono); }
 .muted { color: var(--text-dim); }
 .spread { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .flex { display: flex; align-items: center; gap: 10px; }
+
+/* Checkbox + label row used in option forms. */
+.check { display: flex; align-items: center; gap: 10px; margin: 10px 0 14px; font-weight: 600; }
+.check input { width: auto; }
 
 /* Number input without the up/down spinner buttons. */
 .nospin::-webkit-outer-spin-button, .nospin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }

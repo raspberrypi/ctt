@@ -7,6 +7,7 @@
 # Everything runs in one process (on the Pi). The remote client is just a
 # browser. Captures use Picamera2 directly; the tuner runs as a subprocess.
 
+import contextlib
 import difflib
 import json
 import logging
@@ -52,6 +53,17 @@ try:
 except Exception:  # pragma: no cover - depends on the environment
     _RAWPY = False
     logger.warning('rawpy not available: DNG-only captures will have no in-browser preview')
+
+
+# libcamera installs its built-in (system) tuning files here, one JSON per
+# sensor, split by ISP platform. A local build under /usr/local takes precedence
+# over the distro package, mirroring libcamera's own search order.
+_SYSTEM_TUNING_ROOTS = ('/usr/local/share', '/usr/share')
+
+
+def _system_tuning_dirs(target: str) -> list[Path]:
+    """Installed libcamera tuning directories for an ISP platform ('pisp'/'vc4')."""
+    return [Path(root) / 'libcamera' / 'ipa' / 'rpi' / target for root in _SYSTEM_TUNING_ROOTS]
 
 
 def _run_info(available: dict) -> dict:
@@ -581,6 +593,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
         proj = get_project_or_404(name)
         targets = [t for t in request.args.get('targets', 'pisp,vc4').split(',') if t]
         mode = request.args.get('mode', 'full')
+        update = request.args.get('update') == '1'
         options = {
             'awb': {'greyworld': request.args.get('greyworld') == '1'},
             'alsc': {
@@ -601,7 +614,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
         }
 
         def generate():
-            for line in ctt_runner.run_ctt_stream(proj, targets, mode, options):
+            for line in ctt_runner.run_ctt_stream(proj, targets, mode, options, update=update):
                 yield f'data: {json.dumps(line)}\n\n'
 
         return Response(
@@ -609,6 +622,81 @@ def create_app(workspace_root: str | None = None) -> Flask:
             mimetype='text/event-stream',
             headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
         )
+
+    @app.route('/projects/<name>/run/import-tuning', methods=['POST'])
+    def import_tuning(name: str):
+        """Import a tuning file as this project's tuning for its target.
+
+        The tuning comes from an uploaded file or, with ``system_path``, an
+        installed libcamera tuning. The target is read from the file itself; the
+        file then becomes {name}_{target}.json so a subsequent update run
+        refreshes it in place.
+        """
+        from ctt.core.runner import get_target_from_tuning_file
+        from ctt.utils.errors import ArgError
+
+        proj = get_project_or_404(name)
+        system_path = request.form.get('system_path')
+        if system_path:
+            # Restrict to the installed tuning directories so a request can't read
+            # arbitrary files off the Pi via this endpoint.
+            src = Path(system_path)
+            plat = platform_target()
+            allowed = plat is not None and src.resolve().parent in {d.resolve() for d in _system_tuning_dirs(plat)}
+            if not allowed or not src.is_file():
+                return jsonify({'error': 'Not an installed tuning file'}), 400
+            try:
+                text = src.read_text(encoding='utf-8')
+                json.loads(text)
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as err:
+                return jsonify({'error': f'Could not read system tuning: {err}'}), 400
+        else:
+            upload = request.files.get('file')
+            if upload is None or not upload.filename:
+                return jsonify({'error': 'No file uploaded'}), 400
+            try:
+                text = upload.read().decode('utf-8')
+                json.loads(text)
+            except (UnicodeDecodeError, json.JSONDecodeError) as err:
+                return jsonify({'error': f'Invalid JSON: {err}'}), 400
+        # Stage to a temp file so the target can be read before we know the path.
+        proj.output_dir.mkdir(parents=True, exist_ok=True)
+        tmp = proj.output_dir / f'.import-{proj.name}.json'
+        tmp.write_text(text)
+        try:
+            target = get_target_from_tuning_file(str(tmp))
+        except ArgError as err:
+            tmp.unlink(missing_ok=True)
+            return jsonify({'error': str(err).strip()}), 400
+        tmp.replace(proj.output_dir / f'{proj.name}_{target}.json')
+        return jsonify({'target': target})
+
+    @app.route('/projects/<name>/run/system-tunings')
+    def system_tunings(name: str):
+        """List installed libcamera tunings for this Pi's ISP, for the update base.
+
+        Defaults the selection to the file matching the live sensor model (e.g.
+        imx708.json), so an update can be seeded from the camera's stock tuning.
+        """
+        get_project_or_404(name)
+        target = platform_target()
+        if target is None:
+            return jsonify({'error': 'Could not determine the camera ISP platform.'}), 503
+        model = None
+        with contextlib.suppress(CameraError):
+            model = get_shared_camera().model
+        files: list[dict] = []
+        seen: set[str] = set()
+        for d in _system_tuning_dirs(target):
+            if d.is_dir():
+                for f in sorted(d.glob('*.json')):
+                    if f.name not in seen:  # /usr/local entry wins over /usr/share
+                        seen.add(f.name)
+                        files.append({'name': f.name, 'path': str(f)})
+        default = next((f['path'] for f in files if model and f['name'] == f'{model}.json'), None)
+        if default is None and files:
+            default = files[0]['path']
+        return jsonify({'target': target, 'model': model, 'default': default, 'files': files})
 
     # --- results -----------------------------------------------------------
     @app.route('/projects/<name>/results')
