@@ -94,11 +94,17 @@ def run_ctt_stream(
     targets: list[str],
     mode: str = 'full',
     options: dict | None = None,
+    update: bool = False,
 ) -> Iterator[str]:
     """Run CTT in-process and yield progress lines as they are produced.
 
     Yields each progress line (no trailing newline), then a final
     'CTT_EXIT <code>' line. <code> is non-zero if the run failed.
+
+    When ``update`` is set, each target's existing tuning file
+    ({name}_{target}.json) is updated in place rather than regenerated from the
+    default template: the run re-calibrates only the sections selected by
+    ``mode`` and preserves the rest. Targets with no existing tuning are skipped.
     """
     targets = [t for t in targets if t in VALID_TARGETS]
     if not targets:
@@ -125,6 +131,29 @@ def run_ctt_stream(
         # aren't registered in project.json (exactly as before).
         has_excluded = any(c.excluded for c in project.captures)
         images = [c.filename for c in project.captures if not c.excluded] if has_excluded else None
+
+        # In update mode each target is updated in place from its existing tuning
+        # file; targets without one are skipped. A normal run regenerates all
+        # selected targets from the default template.
+        update_paths: dict[str, str] = {}
+        run_targets = list(targets)
+        skipped: list[str] = []
+        if update:
+            run_targets = []
+            for t in targets:
+                existing = project.output_dir / f'{project.name}_{t}.json'
+                if existing.exists():
+                    update_paths[t] = str(existing)
+                    run_targets.append(t)
+                else:
+                    skipped.append(f'No existing {t} tuning to update — skipped')
+            if not run_targets:
+                for line in skipped:
+                    yield line
+                yield 'ERROR: no existing tuning to update for the selected target(s)'
+                yield 'CTT_EXIT 2'
+                return
+
         q: queue.Queue = queue.Queue()
         result: dict[str, int] = {}
 
@@ -143,17 +172,34 @@ def run_ctt_stream(
             ctt_logger.propagate = False
             code = 0
             try:
-                run_ctt_targets(
-                    project.output_dir,
-                    project.name,
-                    str(project.path),
-                    str(config_path),
-                    targets,
-                    alsc_only=alsc_only,
-                    colour_only=colour_only,
-                    black_level_only=black_level_only,
-                    images=images,
-                )
+                if update:
+                    # run_ctt_targets writes a single update_path, so update each
+                    # target separately with its own existing tuning file.
+                    for t in run_targets:
+                        run_ctt_targets(
+                            project.output_dir,
+                            project.name,
+                            str(project.path),
+                            str(config_path),
+                            [t],
+                            alsc_only=alsc_only,
+                            colour_only=colour_only,
+                            black_level_only=black_level_only,
+                            update_path=update_paths[t],
+                            images=images,
+                        )
+                else:
+                    run_ctt_targets(
+                        project.output_dir,
+                        project.name,
+                        str(project.path),
+                        str(config_path),
+                        run_targets,
+                        alsc_only=alsc_only,
+                        colour_only=colour_only,
+                        black_level_only=black_level_only,
+                        images=images,
+                    )
             except ArgError as err:
                 code = 1
                 for line in str(err).splitlines():
@@ -167,10 +213,14 @@ def run_ctt_stream(
                 result['code'] = code
                 q.put(_SENTINEL)
 
-        header = f'$ ctt (in-process)  targets={",".join(targets)}  mode={mode}'
+        header = f'$ ctt (in-process)  targets={",".join(run_targets)}  mode={mode}'
+        if update:
+            header += '  update=on'
         if images is not None:
             header += f'  excluded={sum(1 for c in project.captures if c.excluded)}'
         yield header
+        for line in skipped:
+            yield line
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         while True:
@@ -182,7 +232,7 @@ def run_ctt_stream(
         # A successful run regenerates the originals, so hand edits no longer
         # apply: discard each run target's custom tuning file.
         if result.get('code', 1) == 0:
-            for t in targets:
+            for t in run_targets:
                 custom = project.output_dir / f'{project.name}_{t}_custom.json'
                 if custom.exists():
                     custom.unlink()

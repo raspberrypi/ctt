@@ -288,3 +288,85 @@ def test_run_stream_passes_image_list(tmp_path, monkeypatch):
     lines = list(ctt_runner.run_ctt_stream(proj, ['pisp'], 'full', {}))
     assert calls[-1]['images'] == ['alsc_5000k_0.dng']
     assert any('excluded=1' in line for line in lines)
+
+
+def test_run_stream_update_uses_existing_per_target(tmp_path, monkeypatch):
+    # Update mode drives run_ctt_targets once per target, each pointed at that
+    # target's existing tuning file via update_path.
+    import ctt.core.runner as runner_mod
+
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('cam')
+    proj.output_dir.mkdir(parents=True, exist_ok=True)
+    (proj.output_dir / 'cam_pisp.json').write_text('{}')
+    (proj.output_dir / 'cam_vc4.json').write_text('{}')
+    calls = []
+    monkeypatch.setattr(runner_mod, 'run_ctt_targets', lambda *a, **kw: calls.append((a, kw)))
+
+    lines = list(ctt_runner.run_ctt_stream(proj, ['pisp', 'vc4'], 'colour-only', {}, update=True))
+    # One call per target, each with a single target and its own update_path.
+    by_target = {a[4][0]: kw for a, kw in calls}
+    assert set(by_target) == {'pisp', 'vc4'}
+    assert by_target['pisp']['update_path'].endswith('cam_pisp.json')
+    assert by_target['vc4']['update_path'].endswith('cam_vc4.json')
+    assert all(len(a[4]) == 1 for a, _ in calls)  # single target each
+    assert any('update=on' in line for line in lines)
+
+
+def test_run_stream_update_skips_missing_and_errors_when_none(tmp_path, monkeypatch):
+    import ctt.core.runner as runner_mod
+
+    ws = sessions.Workspace(tmp_path)
+    proj = ws.create_project('cam')
+    proj.output_dir.mkdir(parents=True, exist_ok=True)
+    (proj.output_dir / 'cam_pisp.json').write_text('{}')  # only pisp exists
+    calls = []
+    monkeypatch.setattr(runner_mod, 'run_ctt_targets', lambda *a, **kw: calls.append((a, kw)))
+
+    # vc4 has no existing tuning: it is skipped, pisp still runs.
+    lines = list(ctt_runner.run_ctt_stream(proj, ['pisp', 'vc4'], 'alsc-only', {}, update=True))
+    assert any('No existing vc4 tuning to update' in line for line in lines)
+    assert [a[4][0] for a, _ in calls] == ['pisp']
+
+    # No existing tuning for any selected target: error, no run.
+    calls.clear()
+    lines = list(ctt_runner.run_ctt_stream(proj, ['vc4'], 'alsc-only', {}, update=True))
+    assert calls == []
+    assert any('no existing tuning to update' in line for line in lines)
+    assert lines[-1] == 'CTT_EXIT 2'
+
+
+def test_import_tuning_route(tmp_path):
+    from io import BytesIO
+
+    from ctt_server.app import create_app
+
+    proj = sessions.Workspace(tmp_path).create_project('cam')
+    client = create_app(str(tmp_path)).test_client()
+
+    # A vc4 tuning (target 'bcm2835') is imported as the project's vc4 tuning.
+    tuning = json.dumps({'version': 2.0, 'target': 'bcm2835', 'algorithms': []})
+    r = client.post(
+        '/projects/cam/run/import-tuning',
+        data={'file': (BytesIO(tuning.encode()), 'whatever.json')},
+        content_type='multipart/form-data',
+    )
+    assert r.status_code == 200
+    assert r.get_json()['target'] == 'vc4'
+    assert (proj.output_dir / 'cam_vc4.json').read_text() == tuning
+
+    # Invalid JSON is rejected.
+    bad = client.post(
+        '/projects/cam/run/import-tuning',
+        data={'file': (BytesIO(b'not json'), 'x.json')},
+        content_type='multipart/form-data',
+    )
+    assert bad.status_code == 400
+
+    # A tuning with an unknown target is rejected.
+    notarget = client.post(
+        '/projects/cam/run/import-tuning',
+        data={'file': (BytesIO(json.dumps({'target': 'nope'}).encode()), 'x.json')},
+        content_type='multipart/form-data',
+    )
+    assert notarget.status_code == 400

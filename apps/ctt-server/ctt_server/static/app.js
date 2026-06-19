@@ -652,6 +652,12 @@ function runApp(cfg) {
     luxMode: 'single',          // 'single' = anchor on nearest-luxAnchor capture; 'average' = robust average
     luxAnchor: 1000,            // anchor lux for single mode
     luxMethod: 'trimmed-mean',  // robust-average method: 'trimmed-mean' | 'median'
+    update: false,              // update an existing tuning in place (preserve non-recalibrated sections)
+    updateSource: 'project',    // 'project' = the project's own tuning; 'system' = an installed libcamera tuning; 'upload' = a supplied file
+    updateFile: null,           // selected file when updateSource === 'upload'
+    systemTunings: [],          // installed libcamera tuning files for this platform: [{name, path}]
+    systemTuning: '',           // selected system tuning path when updateSource === 'system'
+    systemError: '',
     blSeed: null,               // black level measured from the project's dark frames
     blFrames: 0,
     running: false,
@@ -673,13 +679,63 @@ function runApp(cfg) {
       } catch (e) { /* seeding is best-effort */ }
     },
 
-    start() {
+    // List the libcamera tuning files installed on this Pi for its ISP platform,
+    // defaulting the selection to the one matching the live sensor.
+    async loadSystemTunings() {
+      if (this.systemTunings.length) return;  // fetched once per page load
+      this.systemError = '';
+      try {
+        const r = await fetch(`/projects/${this.project}/run/system-tunings`);
+        const d = await r.json();
+        if (!r.ok) { this.systemError = d.error || 'Failed to list system tunings'; return; }
+        this.systemTunings = d.files || [];
+        this.systemTuning = d.default || (this.systemTunings[0] || {}).path || '';
+        if (!this.systemTunings.length) this.systemError = 'No installed tuning files found.';
+      } catch (e) { this.systemError = 'Failed to list system tunings'; }
+    },
+
+    async start() {
       if (this.running) return;
       this.running = true; this.done = false; this.exitCode = null;
       const console = this.$refs.console;
       console.innerHTML = '';
+      // An uploaded or installed (system) tuning becomes the project's tuning for
+      // its (detected) target, then the run updates it in place — restricted to
+      // that target.
+      let targets = this.targets;
+      if (this.update && (this.updateSource === 'upload' || this.updateSource === 'system')) {
+        const body = new FormData();
+        if (this.updateSource === 'upload') {
+          if (!this.updateFile) {
+            this.appendLine(console, 'ERROR: choose a tuning file to upload');
+            this.running = false;
+            return;
+          }
+          body.append('file', this.updateFile);
+        } else {
+          if (!this.systemTuning) {
+            this.appendLine(console, 'ERROR: choose a system tuning file');
+            this.running = false;
+            return;
+          }
+          body.append('system_path', this.systemTuning);
+        }
+        try {
+          const r = await fetch(`/projects/${this.project}/run/import-tuning`, { method: 'POST', body });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'import failed');
+          targets = d.target;
+          const src = this.updateSource === 'system' ? 'system' : 'uploaded';
+          this.appendLine(console, `Imported ${src} tuning as ${targets.toUpperCase()} project tuning`);
+        } catch (e) {
+          this.appendLine(console, `ERROR: ${e.message}`);
+          this.running = false;
+          return;
+        }
+      }
       const params = new URLSearchParams({
-        targets: this.targets, mode: this.mode,
+        targets: targets, mode: this.mode,
+        update: this.update ? '1' : '0',
         greyworld: this.greyworld ? '1' : '0',
         do_alsc_colour: this.doAlscColour ? '1' : '0',
         luminance_strength: this.luminanceStrength,
