@@ -19,10 +19,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# libcamera logs a lot at INFO — notably the one-time sensor-mode probe (reading
-# Picamera2.sensor_modes configures the camera once per mode). Drop INFO so the server
-# console stays readable; warnings/errors still show and an explicit user value wins.
-os.environ.setdefault('LIBCAMERA_LOG_LEVELS', 'WARN')
+# libcamera is noisy at INFO (notably the one-time sensor-mode probe), so the
+# ctt-server entry point defaults LIBCAMERA_LOG_LEVELS to WARN for a readable
+# console — unless launched with --libcamera-log, which leaves the level to the
+# user's environment. See ctt_server/__main__.py.
 
 # The advertised sensor modes are sensor-specific and constant, but reading
 # Picamera2.sensor_modes probes every mode (slow + noisy). Cache them per model so
