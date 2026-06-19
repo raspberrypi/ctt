@@ -799,6 +799,7 @@ function resultsApp(cfg) {
     runs: cfg.runs || {}, // target -> {label, epoch}: when each tuning file was generated
     autoPreview: cfg.autoPreview || false,  // Preview page: start the live test on load
     customs: cfg.customs || {},  // Preview page: target -> custom tuning file exists
+    hasTuning: cfg.hasTuning || false,  // Preview page: any generated tuning exists yet
     // Tuning page: original/custom file text + diff, viewer/editor state.
     tuningState: { original: null, custom: null, diff: null },
     tuningView: 'custom', // which text the contents box shows when a custom exists
@@ -832,7 +833,9 @@ function resultsApp(cfg) {
     init() {
       const f = loadFlip();                            // restore flip choice (persists across tabs)
       this.hflip = !!f.hflip; this.vflip = !!f.vflip;
-      if (this.autoPreview) { this.startPreviewTest(); this.loadLightbox(); }  // Preview page
+      // Preview page: auto-start the generated tuning, or the existing (built-in)
+      // one when the project has no generated tuning yet.
+      if (this.autoPreview) { (this.hasTuning ? this.startPreviewTest() : this.previewStandard()); this.loadLightbox(); }
       if (cfg.allTargets) this.loadAll();              // Results page: new/old + per-target ALSC
       else this.select(this.target);                   // Tuning/Preview: single target
     },
@@ -889,6 +892,8 @@ function resultsApp(cfg) {
 
     async startPreviewTest(kind = 'generated') {
       this.busy = true; this.testError = '';
+      // Switching tuning while already previewing carries the exposure panel over.
+      const keep = this._exposureState();
       try {
         const r = await fetch(`/projects/${this.project}/preview-test`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -901,7 +906,7 @@ function resultsApp(cfg) {
         // Cache-bust so the <img> opens a fresh MJPEG stream on the new camera.
         this.previewSrc = '/api/preview?t=' + Date.now();
         if (this.hflip || this.vflip) await this._postTransform();  // re-apply flip on the fresh camera
-        this._loadCamInfo(); this.pollMetered(); this.pollColour();
+        this._loadCamInfo(keep); this.pollMetered(); this.pollColour();
       } catch (e) {
         this.testError = 'Preview request failed';
       } finally {
@@ -910,6 +915,14 @@ function resultsApp(cfg) {
     },
 
     genLabel() { return (this.runs[this.testTarget] || {}).label || ''; },
+
+    // The exposure-panel state to carry across a tuning switch, or null on the
+    // first start (nothing chosen yet — adopt the reloaded camera's defaults).
+    _exposureState() {
+      if (!this.testing) return null;
+      const c = this.controls;
+      return { auto_exposure: c.auto_exposure, exposure: c.exposure, gain: c.gain, ev: c.ev, fps: this.fpsTarget };
+    },
 
     // POST the current flip state and reopen the stream on the reconfigured camera.
     async _postTransform() {
@@ -952,7 +965,10 @@ function resultsApp(cfg) {
     },
 
     // Fetch sensor model/resolution (and seed metered values) for the info box.
-    async _loadCamInfo() {
+    // preserve: the prior exposure-panel state to carry over a camera reload (so
+    // switching tuning keeps the user's manual/gain/exposure/EV/fps choices),
+    // re-applied over the reloaded camera's fresh control limits.
+    async _loadCamInfo(preserve = null) {
       try {
         const r = await fetch('/api/health');
         if (!r.ok) return;
@@ -964,6 +980,15 @@ function resultsApp(cfg) {
           this.metered = { ...h.controls };
           this.controls = { ...h.controls };
           this.fpsTarget = h.controls.fps || 0;
+          if (preserve) {
+            this.controls.auto_exposure = preserve.auto_exposure;
+            this.controls.exposure = preserve.exposure;
+            this.controls.gain = preserve.gain;
+            this.controls.ev = preserve.ev;
+            this.controls.fps = preserve.fps;
+            this.fpsTarget = preserve.fps || 0;
+            this.applyControls();
+          }
         }
       } catch (e) { /* best effort */ }
     },
@@ -1070,16 +1095,19 @@ function resultsApp(cfg) {
       // Switch the live preview to the camera's default (built-in) tuning, for
       // an A/B against the generated one — stays in preview mode.
       this.busy = true; this.testError = '';
+      // Switching tuning while already previewing carries the exposure panel over.
+      const keep = this._exposureState();
       this.previewSrc = '';  // close the stream before the camera restarts
       try {
         const r = await fetch('/api/preview-default', { method: 'POST' });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) { this.testError = d.error || 'Failed to load standard tuning'; return; }
-        this.testTuning = 'default (built-in)'; this.testTarget = null; this.testKind = 'standard';
+        // Keep testTarget so the Custom button stays visible for an A/B back to it.
+        this.testTuning = 'default (built-in)'; this.testKind = 'standard';
         this.testing = true;
         this.previewSrc = '/api/preview?t=' + Date.now();
         if (this.hflip || this.vflip) await this._postTransform();  // re-apply flip on the fresh camera
-        this._loadCamInfo(); this.pollMetered(); this.pollColour();
+        this._loadCamInfo(keep); this.pollMetered(); this.pollColour();
       } catch (e) {
         this.testError = 'Preview request failed';
       } finally {

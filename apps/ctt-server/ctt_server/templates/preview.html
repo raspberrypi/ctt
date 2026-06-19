@@ -4,30 +4,31 @@
 {% set active_tab = 'preview' %}
 {% include '_project_tabs.html' %}
 
-{% if not files %}
-  <div class="card"><div class="empty"><div class="big">📄</div>No tuning files yet.
-    <a href="{{ url_for('run_page', name=project.name) }}">Run CTT</a> to generate a tuning to preview.</div></div>
-{% else %}
-<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, runs: {{ runs|tojson }}, customs: {{ customs|tojson }}, autoPreview: true })' x-init="init()">
+<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, runs: {{ runs|tojson }}, customs: {{ customs|tojson }}, hasTuning: {{ (files|length > 0)|tojson }}, autoPreview: true })' x-init="init()">
   <!-- Live preview test -->
   <div class="card">
     <div class="card-head">
       <h2>Live preview test</h2>
       <div class="seg" x-show="testing" x-cloak>
-        <button type="button" :class="{active: testKind==='generated'}" @click="startPreviewTest()" :disabled="busy">Tuned</button>
+        <button type="button" :class="{active: testKind==='generated'}" @click="startPreviewTest()" :disabled="busy"
+                x-show="hasTuning" x-cloak>Tuned</button>
         <button type="button" :class="{active: testKind==='custom'}" @click="startPreviewTest('custom')" :disabled="busy"
                 x-show="customs[testTarget]" x-cloak>Custom</button>
         <button type="button" :class="{active: testKind==='standard'}" @click="previewStandard()" :disabled="busy">Existing</button>
       </div>
     </div>
     <div class="banner error mt" x-show="testError" x-text="testError" x-cloak></div>
-    <p class="muted" x-show="!testing" x-cloak>
+    <p class="muted" x-show="!testing && hasTuning" x-cloak>
       Restart the camera with the generated tuning and preview it live to judge the
       result. Uses the tuning matching this Pi's ISP; returning to Capture restores the
       default tuning.
     </p>
+    <p class="muted" x-show="!testing && !hasTuning" x-cloak>
+      No generated tuning yet — <a href="{{ url_for('run_page', name=project.name) }}">Run CTT</a>
+      to create one. You can still preview the camera's <b>existing</b> (built-in) tuning live.
+    </p>
     <div class="btn-row">
-      <button class="btn primary" x-show="!testing" @click="startPreviewTest()" :disabled="busy">
+      <button class="btn primary" x-show="!testing" @click="hasTuning ? startPreviewTest() : previewStandard()" :disabled="busy">
         <span x-text="busy ? 'Starting…' : '▶ Start live preview'"></span>
       </button>
       <button class="btn" x-show="testing" @click="capturePng()" :disabled="busy">
@@ -190,7 +191,6 @@
   </div>
 
 </div>
-{% endif %}
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='vendor/alpine.min.js') }}" defer></script>
