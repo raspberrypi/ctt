@@ -337,9 +337,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
                     }
                 ), 400
         try:
-            # Hand-edited tunings are canary-tested in a subprocess first: a bad
-            # one would otherwise wedge this process's camera until a restart.
-            cam = reload_shared_camera(tuning_file=str(json_path), preview_max_width=1920, validate=(kind == 'custom'))
+            cam = reload_shared_camera(tuning_file=str(json_path), preview_max_width=1920)
         except CameraError as err:
             return jsonify({'error': str(err)}), 503
         return jsonify({'target': target, 'tuning': json_path.name, 'kind': kind, 'model': cam.model})

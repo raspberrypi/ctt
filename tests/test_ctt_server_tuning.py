@@ -91,9 +91,7 @@ def test_preview_test_custom_kind(client, tmp_path, monkeypatch):
     monkeypatch.setattr(
         app_module,
         'reload_shared_camera',
-        lambda tuning_file=None, preview_max_width=1280, validate=False: (
-            calls.update(tuning=tuning_file, validate=validate) or FakeCam()
-        ),
+        lambda tuning_file=None, preview_max_width=1280: calls.update(tuning=tuning_file) or FakeCam(),
     )
     # No custom file yet: a clear 400, and the camera is not reloaded.
     r = client.post('/projects/cam/preview-test', json={'kind': 'custom'})
@@ -106,37 +104,10 @@ def test_preview_test_custom_kind(client, tmp_path, monkeypatch):
     assert r.status_code == 200
     assert (d['kind'], d['tuning']) == ('custom', 'cam_pisp_custom.json')
     assert calls['tuning'].endswith('cam_pisp_custom.json')
-    assert calls['validate'] is True  # hand edits are canary-tested before loading
 
-    # The default kind still loads the generated original, without the canary.
+    # The default kind loads the generated original.
     r = client.post('/projects/cam/preview-test')
     assert r.get_json()['tuning'] == 'cam_pisp.json'
-    assert calls['validate'] is False
-
-
-def test_validate_tuning_file_reports_libcamera_error(monkeypatch):
-    from ctt_server import camera as camera_mod
-
-    class FakeProc:
-        returncode = 1
-        stdout = ''
-        stderr = 'Traceback ...\nERROR IPA module failed to load tuning\nRuntimeError: boom'
-
-    monkeypatch.setattr(camera_mod.subprocess, 'run', lambda *a, **kw: FakeProc())
-    with pytest.raises(camera_mod.CameraError, match='IPA module failed'):
-        camera_mod.validate_tuning_file('/tmp/x_custom.json')
-
-
-def test_validate_tuning_file_passes_on_success(monkeypatch):
-    from ctt_server import camera as camera_mod
-
-    class FakeProc:
-        returncode = 0
-        stdout = ''
-        stderr = ''
-
-    monkeypatch.setattr(camera_mod.subprocess, 'run', lambda *a, **kw: FakeProc())
-    camera_mod.validate_tuning_file('/tmp/x_custom.json')  # must not raise
 
 
 def test_run_stream_discards_custom(tmp_path, monkeypatch):

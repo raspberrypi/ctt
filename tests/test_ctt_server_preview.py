@@ -35,7 +35,7 @@ def test_preview_test_loads_platform_tuning(client, tmp_path, monkeypatch):
     monkeypatch.setattr(
         app_module,
         'reload_shared_camera',
-        lambda tuning_file=None, preview_max_width=1280, validate=False: (
+        lambda tuning_file=None, preview_max_width=1280: (
             calls.update(tuning=tuning_file, width=preview_max_width) or FakeCam()
         ),
     )
