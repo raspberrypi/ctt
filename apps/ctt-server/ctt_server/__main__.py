@@ -6,6 +6,7 @@
 
 import argparse
 import logging
+import os
 import sys
 
 
@@ -20,7 +21,21 @@ def main() -> None:
     # pass your own with --cert/--key.
     parser.add_argument('--cert', default=None, help='TLS certificate (PEM); default: auto self-signed')
     parser.add_argument('--key', default=None, help='TLS private key (PEM); default: auto self-signed')
+    parser.add_argument(
+        '--libcamera-log',
+        action='store_true',
+        help='Let libcamera log to the console. ctt-server then leaves LIBCAMERA_LOG_LEVELS '
+        'untouched so you set the level yourself (e.g. LIBCAMERA_LOG_LEVELS=INFO ctt-server '
+        '--libcamera-log); without this flag libcamera is quietened to WARN.',
+    )
     args = parser.parse_args()
+
+    # Keep the console quiet by default. With --libcamera-log we leave
+    # LIBCAMERA_LOG_LEVELS alone so the user controls libcamera's verbosity from the
+    # command line. libcamera reads the level once when it first loads, so this must
+    # run before importing the app (which pulls in the camera module).
+    if not args.libcamera_log:
+        os.environ.setdefault('LIBCAMERA_LOG_LEVELS', 'WARN')
 
     # Flask is an optional extra; give a clear hint rather than an ImportError
     # traceback if ctt-server is launched from a bare `pip install rpi-ctt`.
