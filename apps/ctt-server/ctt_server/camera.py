@@ -91,6 +91,7 @@ class Picamera2Camera:
                         'size': size,
                         'bit_depth': int(m.get('bit_depth', 0)),
                         'fps': round(float(m.get('fps', 0.0)), 1),
+                        'unpacked': str(m['unpacked']),
                     }
                     if size not in by_size or entry['bit_depth'] > by_size[size]['bit_depth']:
                         by_size[size] = entry
@@ -128,6 +129,9 @@ class Picamera2Camera:
         w, h = (int(mode['size'][0]), int(mode['size'][1]))
         self._raw_size = (w, h)
         self._raw_bit_depth = int(mode.get('bit_depth', 0)) or None
+        # Unpacked Bayer format (e.g. 'SRGGB12') so the raw stream is delivered
+        # one sample per 16-bit word rather than MIPI-packed (the _CSI2P default).
+        self._raw_format = mode.get('unpacked')
         self.resolution = self._raw_size
         # Preview derived from the mode's frame, scaled down preserving aspect.
         prev_w = min(self._preview_max_width, w) & ~1
@@ -178,7 +182,7 @@ class Picamera2Camera:
     def _video_config(self):
         return self._picam2.create_video_configuration(
             main={'size': self._preview_size, 'format': 'RGB888'},
-            raw={'size': self._raw_size},
+            raw={'size': self._raw_size, 'format': self._raw_format},
             sensor=self._sensor_config(),
             transform=self._transform(),
             buffer_count=4,
@@ -462,7 +466,7 @@ class Picamera2Camera:
         with self._lock:
             still = self._picam2.create_still_configuration(
                 main={'size': self.resolution, 'format': 'RGB888'},
-                raw={'size': self._raw_size},
+                raw={'size': self._raw_size, 'format': self._raw_format},
                 sensor=self._sensor_config(),
                 transform=self._transform(),
             )
