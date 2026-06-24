@@ -792,6 +792,7 @@ function resultsApp(cfg) {
     charts: {},
     metrics: null,
     ccmCt: null,          // selected colour temp for the per-patch ΔE chart
+    gammaTarget: 'sRGB',  // gamma card: target transfer function (recomputed client-side)
     view: 'new',          // results page: 'new' (this calibration) | 'old' (built-in default)
     all: {},              // results page: target -> full /results/data response
     alscTarget: cfg.targets[0],  // ALSC card's own target toggle (PISP/VC4)
@@ -869,6 +870,8 @@ function resultsApp(cfg) {
       }
       const cts = ((this.metrics && this.metrics.ccm) || []).map((c) => c.ct);
       if (!cts.includes(this.ccmCt)) this.ccmCt = cts.length ? cts[0] : null;
+      // Open the gamma card on the target the run recorded; the user can change it.
+      this.gammaTarget = (this.metrics && this.metrics.gamma && this.metrics.gamma.target) || 'sRGB';
     },
 
     hasDefault() { const d = this.all[this.target]; return !!(d && d.metrics && d.metrics.default); },
@@ -1330,6 +1333,112 @@ function resultsApp(cfg) {
           this.renderBlackLevel();
         }
       } catch (e) { console.error('Black level chart:', e); }
+      try {
+        if (this.metrics && this.metrics.gamma && (this.metrics.gamma.curve || this.metrics.gamma.tone)) {
+          this.renderGamma();
+        }
+      } catch (e) { console.error('Gamma chart:', e); }
+    },
+
+    // Opto-electronic transfer function (linear 0-1 -> code 0-1) for the selected
+    // target. Mirrors ctt/algorithms/gamma_check.py so the target can be changed in
+    // the browser without re-running the calibration (the measured data is fixed).
+    gammaOetf(name) {
+      const clamp = (x) => Math.min(1, Math.max(0, x));
+      if (name === 'rec709') return (x) => clamp(x < 0.018 ? 4.5 * x : 1.099 * Math.pow(x, 0.45) - 0.099);
+      if (name === 'rec2020') {
+        const a = 1.09929682680944, b = 0.018053968510807;
+        return (x) => clamp(x < b ? 4.5 * x : a * Math.pow(x, 0.45) - (a - 1));
+      }
+      if (name.startsWith('power:')) {
+        const n = parseFloat(name.slice(6)) || 2.2;
+        return (x) => clamp(Math.pow(Math.max(x, 0), 1 / n));
+      }
+      return (x) => clamp(x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055);  // sRGB
+    },
+
+    // The standard targets plus whatever the run recorded (e.g. a custom power law).
+    gammaTargetOptions() {
+      const base = ['sRGB', 'rec709', 'rec2020', 'power:2.2', 'power:2.4'];
+      const cur = this.metrics && this.metrics.gamma && this.metrics.gamma.target;
+      if (cur && !base.includes(cur)) base.unshift(cur);
+      return base;
+    },
+    gammaTargetLabel(t) {
+      return { sRGB: 'sRGB', rec709: 'Rec.709', rec2020: 'Rec.2020' }[t] || t.replace('power:', 'Gamma ');
+    },
+    setGammaTarget(t) {
+      this.gammaTarget = t;
+      this.$nextTick(() => requestAnimationFrame(() => { try { this.renderGamma(); } catch (e) { console.error(e); } }));
+    },
+
+    // Per-grey reflectance ratios (white = 1) for recomputing the target output.
+    // Prefer tone.patches; fall back to linearity.patches for sidecars written
+    // before tone carried 'reflectance' (so the target is still recomputable).
+    gammaReflRatios() {
+      const g = (this.metrics && this.metrics.gamma) || {};
+      const tone = (g.tone && g.tone.patches) || [];
+      if (tone.length && tone[0].reflectance != null) return tone.map((p) => p.reflectance);
+      const lin = (g.linearity && g.linearity.patches) || [];
+      if (lin.length) { const mx = Math.max(...lin.map((p) => p.reflectance)); return lin.map((p) => p.reflectance / mx); }
+      return tone.map(() => null);
+    },
+
+    // Headline figures, recomputed for the selected target. Linearity is a property
+    // of the sensor (target-independent), so only tone/curve deviation move.
+    gammaStats() {
+      const g = (this.metrics && this.metrics.gamma) || {};
+      const oetf = this.gammaOetf(this.gammaTarget);
+      const rms = (a) => (a.length ? Math.sqrt(a.reduce((s, v) => s + v * v, 0) / a.length) : NaN);
+      const out = [];
+      if (g.tone && g.tone.patches && g.tone.patches.length) {
+        const rr = this.gammaReflRatios();
+        const errs = g.tone.patches
+          .map((p, i) => (rr[i] == null ? null : p.measured - oetf(rr[i]) * 255))
+          .filter((e) => e != null);
+        out.push(['Tone RMS (8-bit)', errs.length ? rms(errs).toFixed(1) : '—']);
+      }
+      if (g.curve && g.curve.points) {
+        out.push(['Curve RMS (8-bit)', rms(g.curve.points.map((p) => (p.measured - oetf(p.x)) * 255)).toFixed(1)]);
+      }
+      if (g.linearity) out.push(['Linearity R²', g.linearity.r2.toFixed(4)]);
+      return out;
+    },
+
+    renderGamma() {
+      const g = this.metrics.gamma;
+      const ctx = document.getElementById('gammaChart');
+      if (!ctx) return;
+      // Re-renders (target change) reuse the canvas; Chart.js needs the old chart
+      // destroyed first or new Chart() throws and the stale chart stays.
+      this._charts.gamma?.destroy();
+      const oetf = this.gammaOetf(this.gammaTarget);
+      const datasets = [];
+      if (g.curve && g.curve.points) {
+        const pts = g.curve.points;
+        datasets.push({
+          type: 'line', label: 'gamma curve',
+          data: pts.map((p) => ({ x: p.x * 255, y: p.measured * 255 })),
+          borderColor: '#3b82f6', borderWidth: 2, pointRadius: 0, tension: 0,
+        });
+        datasets.push({
+          type: 'line', label: this.gammaTargetLabel(this.gammaTarget),
+          data: pts.map((p) => ({ x: p.x * 255, y: oetf(p.x) * 255 })),
+          borderColor: '#9aa7b8', borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, tension: 0,
+        });
+      }
+      if (g.tone && g.tone.patches) {
+        datasets.push({
+          type: 'scatter', label: 'measured greys',
+          data: g.tone.patches.map((p) => ({ x: p.input * 255, y: p.measured })),
+          backgroundColor: '#e5484d', pointRadius: 4,
+        });
+      }
+      const opts = chartOpts('Input (linear, 8-bit)', 'Output code (8-bit)');
+      opts.scales.x.type = 'linear';
+      opts.scales.x.min = 0; opts.scales.x.max = 255;
+      opts.scales.y.min = 0; opts.scales.y.max = 255;
+      this._charts.gamma = new Chart(ctx, { data: { datasets }, options: opts });
     },
 
     // All dark frames at a single total exposure: a trend plot is meaningless,
