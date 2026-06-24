@@ -97,6 +97,31 @@
     <p class="hint">Luminance per lux (Y / lux·exp·gain) for each capture against colour temperature — ideally flat. The dashed line is the value the lux calibration uses. A sloped/scattered response means the sensor's luminance-per-lux is colour-temperature dependent, so a single lux reference will read off away from the anchor.</p>
   </div>
 
+  <!-- Gamma / tone-curve verification -->
+  <div class="card mt" x-show="metrics && metrics.gamma && (metrics.gamma.curve || metrics.gamma.tone)" x-cloak>
+    <div class="card-head">
+      <h2>Gamma / tone curve</h2>
+      <label class="chip">target:
+        <select x-model="gammaTarget" @change="setGammaTarget(gammaTarget)">
+          <template x-for="t in gammaTargetOptions()" :key="t">
+            <option :value="t" x-text="gammaTargetLabel(t)"></option>
+          </template>
+        </select>
+      </label>
+    </div>
+    <div class="chart-box"><canvas id="gammaChart"></canvas></div>
+    <div class="stats">
+      <template x-for="s in gammaStats()" :key="s[0]">
+        <div class="stat"><div class="n" x-text="s[1]"></div><div class="l" x-text="s[0]"></div></div>
+      </template>
+    </div>
+    <p class="hint">The template gamma curve (solid) against the target transfer function (dashed), with the measured
+      Macbeth greyscale patches (points) pushed through the actual curve. Gamma is not tuned — it is a fixed curve — so
+      this is a check, not a calibration. The greys are normalised so white sits at 1:1; deviation in the shadows/mids
+      means sensor non-linearity or a curve that differs from the target. Linearity R² near 1 means the sensor itself is
+      linear, so any tone error is the curve's shape rather than the sensor.</p>
+  </div>
+
   <!-- Black level vs total exposure -->
   <div class="card mt" x-show="metrics && metrics.black_level && (metrics.black_level.frames || []).length" x-cloak>
     <div class="card-head">

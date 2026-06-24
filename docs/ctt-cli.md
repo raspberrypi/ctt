@@ -121,6 +121,9 @@ An optional JSON config file controls calibration behaviour. See
     "macbeth": {
         "small": 0,
         "show": 0
+    },
+    "gamma": {
+        "target": "sRGB"
     }
 }
 ```
@@ -134,6 +137,7 @@ An optional JSON config file controls calibration behaviour. See
 - **blacklevel** - Override black level; -1 to auto-detect (default: -1)
 - **macbeth.small** - Use small Macbeth chart detection (default: 0)
 - **macbeth.show** - Display detected Macbeth chart (default: 0)
+- **gamma.target** - Target transfer function the gamma verification reports against: `sRGB` (default), `rec709`, `rec2020`, or a power law `power:<n>` (e.g. `power:2.2`). Diagnostic only - the gamma curve is never tuned.
 
 ## Calibration images
 
@@ -160,3 +164,4 @@ temp/lux not in filename, or Macbeth not found) with the filename.
 | Noise | `rpi.noise` | Noise profile characterisation |
 | Lux | `rpi.lux` | Lux level calibration |
 | GEQ | `rpi.geq` | Green equalisation threshold |
+| Gamma | _(none)_ | Tone-curve verification - measures the achieved tone response against a target; reports to metrics only, never tunes |

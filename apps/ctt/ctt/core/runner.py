@@ -18,6 +18,7 @@ from ..algorithms.awb import AwbCalibration
 from ..algorithms.black_level import BlackLevelCalibration
 from ..algorithms.cac import CacCalibration
 from ..algorithms.ccm import CcmCalibration
+from ..algorithms.gamma_check import GammaCheck
 from ..algorithms.geq import GeqCalibration
 from ..algorithms.lux import LuxCalibration
 from ..algorithms.noise import NoiseCalibration
@@ -37,6 +38,17 @@ def get_platform(target_name: str) -> object:
         return vc4_mod.get_config()
     else:
         raise ArgError(f'\n\nError: Unknown target platform: {target_name}')
+
+
+def _valid_gamma_target(target: object) -> bool:
+    if target in ('sRGB', 'rec709', 'rec2020'):
+        return True
+    if isinstance(target, str) and target.startswith('power:'):
+        try:
+            return float(target.split(':', 1)[1]) > 0
+        except ValueError:
+            return False
+    return False
 
 
 def get_target_from_tuning_file(path: str) -> str:
@@ -142,6 +154,13 @@ def run_ctt(
     if lux_reference_method not in ('trimmed-mean', 'median'):
         logger.warning('\nInvalid lux reference_method, defaulted to trimmed-mean')
         lux_reference_method = 'trimmed-mean'
+
+    # Gamma verification target transfer function: sRGB (default), rec709, rec2020
+    # or a power law 'power:<n>' (e.g. power:2.2). Diagnostic only; never tuned.
+    gamma_target = configs.get('gamma', {}).get('target', 'sRGB')
+    if not _valid_gamma_target(gamma_target):
+        logger.warning('\nInvalid gamma target, defaulted to sRGB')
+        gamma_target = 'sRGB'
 
     if blacklevel < -1 or blacklevel >= 2**16:
         logger.warning('\nInvalid blacklevel, defaulted to 64')
@@ -253,6 +272,9 @@ def run_ctt(
             GeqCalibration(cam, platform),
             LuxCalibration(cam, platform, lux_reference_target, lux_reference_method),
             NoiseCalibration(cam, platform),
+            # Diagnostic only (reports to metrics, never writes rpi.contrast). Needs
+            # the measured black level; independent of AWB/CCM.
+            GammaCheck(cam, platform, gamma_target),
         ]
         if 'rpi.cac' in json_template:
             algorithms.append(CacCalibration(cam, platform, do_alsc_colour))

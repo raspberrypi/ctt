@@ -22,5 +22,9 @@
         "matrix_selection": "average",
         "matrix_selection_types": [ "average", "maximum", "patches" ],
         "test_patches": [ 1, 2, 5, 8, 9, 12, 14 ]
+    },
+    "gamma":
+    {
+        "target": "sRGB"
     }
 }
