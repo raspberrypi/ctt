@@ -23,8 +23,8 @@
     <div class="banner info mt" x-show="runsMismatch()" x-cloak>⚠ PiSP and VC4 were generated at different times — re-run to refresh both.</div>
     <div class="btn-row">
       <a class="btn primary" :href="'/projects/{{ project.name }}/download/json/'+target">⬇ Download JSON</a>
-      <a class="btn" x-show="tuningState.custom !== null" x-cloak
-         :href="'/projects/{{ project.name }}/download/custom/'+target">⬇ Download custom JSON</a>
+      <a class="btn" x-show="variantId != null" x-cloak
+         :href="'/projects/{{ project.name }}/download/custom/'+target+'?variant='+variantId">⬇ Download custom JSON</a>
       <a class="btn" :href="'/projects/{{ project.name }}/download/log/'+target">⬇ Download log</a>
       <a class="btn ghost" href="{{ url_for('download_archive', name=project.name) }}">⬇ Download project (.zip)</a>
     </div>
@@ -34,15 +34,19 @@
   <div class="card mt">
     <div class="card-head">
       <h2>File contents</h2>
-      <div style="display:flex; gap:10px; align-items:center">
-        <div class="seg compact" x-show="tuningState.custom !== null && !editing" x-cloak>
-          <button type="button" :class="{active: tuningView==='original'}" @click="setTuningView('original')">Original</button>
-          <button type="button" :class="{active: tuningView==='custom'}" @click="setTuningView('custom')">Custom</button>
-        </div>
-        <button type="button" class="btn sm" x-show="!editing" @click="startEdit()">✎ Edit</button>
-        <button type="button" class="btn sm ghost" x-show="tuningState.custom !== null && !editing" x-cloak
-                @click="revertCustom()">Revert</button>
-        <span class="muted" x-text="target.toUpperCase()"></span>
+      <div style="display:flex; gap:10px; align-items:center" x-show="!editing">
+        <select @change="selectTuning($event.target.value)" :disabled="editing"
+                title="Show the tuned file, the camera's system (built-in) tuning, or a saved custom tuning">
+          <option value="original" :selected="tuningSel === 'original'">Tuned</option>
+          <option value="existing" :selected="tuningSel === 'existing'" x-show="tuningState.existing">System</option>
+          <template x-for="v in tuningState.variants" :key="v.id">
+            <option :value="v.id" :selected="tuningSel === v.id"
+                    x-text="(v.stale ? '⚠ ' : '') + v.label"></option>
+          </template>
+        </select>
+        <button type="button" class="btn sm" @click="startEdit()" x-text="variantId == null ? '✎ Edit (save as new)' : '✎ Edit'"></button>
+        <button type="button" class="btn sm" x-show="variantId != null" x-cloak @click="copyVariant()">⧉ Copy</button>
+        <button type="button" class="btn sm ghost" x-show="variantId != null" x-cloak @click="removeVariant()">🗑 Remove</button>
       </div>
     </div>
     <div class="banner error mt" x-show="tuningError" x-text="tuningError" x-cloak></div>
@@ -54,18 +58,19 @@
       <div>
         <textarea class="json-edit" x-model="editorText" spellcheck="false"></textarea>
         <div class="btn-row mt">
-          <button type="button" class="btn primary" @click="saveEdit()">Save custom tuning</button>
+          <button type="button" class="btn primary" x-show="variantId != null" x-cloak @click="saveEdit()">Save changes</button>
+          <button type="button" class="btn" @click="saveAsNew()">Save as new custom tuning…</button>
           <button type="button" class="btn ghost" @click="editing=false; tuningError=''">Cancel</button>
         </div>
-        <p class="hint">Saved as <code x-text="'{{ project.name }}_' + target + '_custom.json'"></code> alongside the
-          generated original (which is never modified). Custom edits are discarded when CTT regenerates this
-          target's tuning, and can be previewed live from the Preview tab.</p>
+        <p class="hint">Custom tunings are saved alongside the generated original (which is never modified) and can be
+          previewed live from the Preview tab. They persist when CTT regenerates this target, but are flagged
+          <b>⚠ stale</b> once the original has been re-tuned since they were last saved.</p>
       </div>
     </template>
   </div>
 
-  <!-- Diff of the custom edits against the generated original -->
-  <div class="card mt" x-show="tuningState.diff" x-cloak>
+  <!-- Diff of the custom edits against the Tuned file (only for a saved variant) -->
+  <div class="card mt" x-show="variantId != null && tuningState.diff" x-cloak>
     <div class="card-head">
       <h2>Custom edits diff</h2>
       <span class="muted" x-text="target.toUpperCase()"></span>

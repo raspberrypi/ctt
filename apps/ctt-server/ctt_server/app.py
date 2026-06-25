@@ -11,6 +11,7 @@ import contextlib
 import difflib
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -317,16 +318,25 @@ def create_app(workspace_root: str | None = None) -> Flask:
     def preview_test(name: str):
         """Restart the camera with this project's generated (or custom) tuning for live preview."""
         proj = get_project_or_404(name)
-        kind = (request.get_json(silent=True) or {}).get('kind', 'generated')
+        body = request.get_json(silent=True) or {}
+        kind = body.get('kind', 'generated')
         target = platform_target()
         if target is None:
             return jsonify({'error': 'Could not determine the camera ISP platform.'}), 503
+        label = None
+        variant_id = None
         if kind == 'custom':
-            json_path = proj.output_dir / f'{proj.name}_{target}_custom.json'
-            if not json_path.exists():
+            # Pick the requested variant (by slug), falling back to the first one.
+            variant = body.get('variant')
+            variants = _list_variants(proj, target)
+            sel = next((v for v in variants if v['id'] == variant), None) or (variants[0] if variants else None)
+            variant_id = sel['id'] if sel else None
+            if sel is None:
                 return jsonify(
-                    {'error': f'No custom tuning edits for {target.upper()} — save edits on the Tuning tab first.'}
+                    {'error': f'No custom tuning for {target.upper()} — save one on the Tuning tab first.'}
                 ), 400
+            json_path = _variant_path(proj, target, variant_id)
+            label = sel['label']
         else:
             json_path = proj.output_dir / f'{proj.name}_{target}.json'
             if not json_path.exists():
@@ -340,7 +350,16 @@ def create_app(workspace_root: str | None = None) -> Flask:
             cam = reload_shared_camera(tuning_file=str(json_path), preview_max_width=1920)
         except CameraError as err:
             return jsonify({'error': str(err)}), 503
-        return jsonify({'target': target, 'tuning': json_path.name, 'kind': kind, 'model': cam.model})
+        return jsonify(
+            {
+                'target': target,
+                'tuning': json_path.name,
+                'kind': kind,
+                'model': cam.model,
+                'variant': variant_id,
+                'label': label,
+            }
+        )
 
     @app.route('/api/preview-default', methods=['POST'])
     def api_preview_default():
@@ -716,9 +735,9 @@ def create_app(workspace_root: str | None = None) -> Flask:
         proj = get_project_or_404(name)
         files = ctt_runner.output_files(proj, ['pisp', 'vc4'])
         available = {t: f for t, f in files.items() if f['json']}
-        customs = {t: _custom_tuning_path(proj, t).exists() for t in available}
+        variants = {t: _list_variants(proj, t) for t in available}
         return render_template(
-            'preview.html', project=proj, files=available, runs=_run_info(available), customs=customs
+            'preview.html', project=proj, files=available, runs=_run_info(available), variants=variants
         )
 
     # --- MTF (slanted-edge) --------------------------------------------------
@@ -818,7 +837,17 @@ def create_app(workspace_root: str | None = None) -> Flask:
     @app.route('/projects/<name>/download/<kind>/<target>')
     def download(name: str, kind: str, target: str):
         proj = get_project_or_404(name)
-        suffix = {'json': '.json', 'log': '.log', 'custom': '_custom.json'}.get(kind)
+        if kind == 'custom':
+            # A specific variant by ?variant=<slug>, else the first one. Only a
+            # listed slug reaches a file path (so this can't read arbitrary files).
+            variant = request.args.get('variant')
+            slugs = [v['id'] for v in _list_variants(proj, target)]
+            slug = variant if variant in slugs else (slugs[0] if not variant and slugs else None)
+            path = _variant_path(proj, target, slug) if slug is not None else None
+            if path is None or not path.exists():
+                abort(404)
+            return send_file(path, as_attachment=True, download_name=path.name)
+        suffix = {'json': '.json', 'log': '.log'}.get(kind)
         if suffix is None:
             abort(404)
         path = proj.output_dir / f'{proj.name}_{target}{suffix}'
@@ -826,61 +855,289 @@ def create_app(workspace_root: str | None = None) -> Flask:
             abort(404)
         return send_file(path, as_attachment=True, download_name=path.name)
 
-    # --- custom (hand-edited) tuning files ----------------------------------
-    def _custom_tuning_path(proj: Project, target: str) -> Path:
-        return proj.output_dir / f'{proj.name}_{target}_custom.json'
+    # --- custom (hand-edited) tuning variants -------------------------------
+    # A target can carry several hand-edited tuning variants, each a full tuning
+    # JSON with a user label. The files are authoritative for existence and are
+    # named by a slug derived from the label, for readability:
+    #   output/{proj}_{target}_custom_{slug}.json    (slug = 'warm-skin-v2')
+    # A small per-target manifest maps slug -> the exact label + a staleness
+    # baseline (the slug is lossy, so the label is kept verbatim here):
+    #   output/{proj}_{target}_custom_index.json     [{id, label, base_mtime}]
+    # The manifest is non-authoritative: every list reconciles it against the
+    # files on disk, so an out-of-band delete can't leave a dangling entry. The
+    # legacy single custom file ({proj}_{target}_custom.json) and any files from
+    # the earlier integer-id scheme are migrated to slug names on first sight.
+    # base_mtime is the generated original's mtime when the variant was last
+    # saved; a variant is "stale" once the original has been regenerated past it.
+    MAX_VARIANTS = 20
+    MAX_LABEL_LEN = 60
 
-    def _tuning_state(proj: Project, target: str) -> dict:
-        """Original + custom tuning text for a target, with a unified diff."""
+    def _generated_path(proj: Project, target: str) -> Path:
+        return proj.output_dir / f'{proj.name}_{target}.json'
+
+    def _generated_mtime(proj: Project, target: str) -> float | None:
+        gen = _generated_path(proj, target)
+        return gen.stat().st_mtime if gen.exists() else None
+
+    def _existing_tuning_text(proj: Project, target: str) -> str | None:
+        """The camera's built-in (existing) tuning text for this target, if known.
+
+        The run records which installed libcamera tuning it compared against as
+        'default_tuning_path' in the metrics sidecar; that is the "Existing" file.
+        """
+        metrics_path = proj.output_dir / f'{proj.name}_{target}_metrics.json'
+        if metrics_path.exists():
+            with contextlib.suppress(OSError, json.JSONDecodeError):
+                dp = json.loads(metrics_path.read_text()).get('default_tuning_path')
+                if dp and Path(dp).exists():
+                    return Path(dp).read_text()
+        return None
+
+    def _index_path(proj: Project, target: str) -> Path:
+        return proj.output_dir / f'{proj.name}_{target}_custom_index.json'
+
+    def _variant_path(proj: Project, target: str, slug: str) -> Path:
+        return proj.output_dir / f'{proj.name}_{target}_custom_{slug}.json'
+
+    def _valid_target(target: str) -> None:
         if target not in ctt_runner.VALID_TARGETS:
             abort(404)
-        json_path = proj.output_dir / f'{proj.name}_{target}.json'
-        if not json_path.exists():
-            abort(404, 'No tuning file for that target')
-        original = json_path.read_text()
-        custom_path = _custom_tuning_path(proj, target)
-        custom = custom_path.read_text() if custom_path.exists() else None
-        diff = None
-        if custom is not None:
-            diff = '\n'.join(
-                difflib.unified_diff(
-                    original.splitlines(),
-                    custom.splitlines(),
-                    fromfile=json_path.name,
-                    tofile=custom_path.name,
-                    lineterm='',
+
+    def _valid_slug(slug: str) -> str:
+        """Guard the untrusted slug path segment before it reaches a file path."""
+        if slug == 'index' or not re.fullmatch(r'[a-z0-9][a-z0-9-]*', slug or ''):
+            abort(404)
+        return slug
+
+    def _slugify(label: str) -> str:
+        """A readable, path-safe filename stem from a label ('Warm Skin v2' -> 'warm-skin-v2')."""
+        slug = re.sub(r'[^a-z0-9]+', '-', label.strip().lower()).strip('-')
+        # 'index' is reserved (the manifest is {proj}_{target}_custom_index.json).
+        return 'custom' if not slug or slug == 'index' else slug
+
+    def _unique_slug(label: str, taken: set[str]) -> str:
+        base = _slugify(label)
+        slug, n = base, 2
+        while slug in taken:
+            slug, n = f'{base}-{n}', n + 1
+        return slug
+
+    def _validate_label(label: str) -> str | None:
+        if not label:
+            return 'A label is required.'
+        if len(label) > MAX_LABEL_LEN:
+            return f'Label too long (max {MAX_LABEL_LEN} characters).'
+        return None
+
+    def _disk_variant_slugs(proj: Project, target: str) -> dict[str, Path]:
+        """slug -> file path for every {proj}_{target}_custom_<slug>.json on disk."""
+        out: dict[str, Path] = {}
+        prefix = f'{proj.name}_{target}_custom_'
+        index_name = _index_path(proj, target).name
+        for p in proj.output_dir.glob(f'{prefix}*.json'):
+            if p.name == index_name:  # the manifest is not a variant
+                continue
+            slug = p.name[len(prefix) : -len('.json')]
+            if slug:
+                out[slug] = p
+        return out
+
+    def _read_index(proj: Project, target: str) -> list[dict]:
+        p = _index_path(proj, target)
+        if p.exists():
+            with contextlib.suppress(json.JSONDecodeError, OSError):
+                data = json.loads(p.read_text())
+                if isinstance(data, list):
+                    return data
+        return []
+
+    def _write_index(proj: Project, target: str, entries: list[dict]) -> None:
+        idx = _index_path(proj, target)
+        if entries:
+            proj.output_dir.mkdir(parents=True, exist_ok=True)
+            idx.write_text(json.dumps(entries, indent=2))
+        elif idx.exists():
+            idx.unlink()  # no variants left: don't leave an empty index lying around
+
+    def _reconcile_variants(proj: Project, target: str) -> list[dict]:
+        """Manifest reconciled against the files on disk (and persisted).
+
+        Migrates legacy/integer-id files to slug names, drops entries whose file
+        is gone, and synthesises an entry for any orphan file with no manifest
+        record. Returns the variant list as [{id (slug), label, base_mtime}].
+        """
+        disk = _disk_variant_slugs(proj, target)
+        entries = _read_index(proj, target)
+        label_by_slug: dict[str, str] = {}
+        base_by_slug: dict[str, float | None] = {}
+        for e in entries:
+            if isinstance(e, dict) and e.get('id') is not None:
+                label_by_slug[str(e['id'])] = e.get('label')
+                base_by_slug[str(e['id'])] = e.get('base_mtime')
+
+        def adopt(old_slug: str | None, src: Path, label: str, base: float | None) -> None:
+            new_slug = _unique_slug(label, set(disk) - ({old_slug} if old_slug else set()))
+            dest = _variant_path(proj, target, new_slug)
+            src.rename(dest)
+            if old_slug:
+                del disk[old_slug]
+            disk[new_slug] = dest
+            label_by_slug[new_slug] = label
+            base_by_slug[new_slug] = base
+
+        # Migrate files from the earlier integer-id scheme to label-based slugs.
+        for old in [s for s in list(disk) if s.isdigit()]:
+            adopt(old, disk[old], label_by_slug.get(old) or f'Custom {old}', base_by_slug.get(old))
+        # Migrate the legacy single custom file.
+        legacy = proj.output_dir / f'{proj.name}_{target}_custom.json'
+        if legacy.exists():
+            adopt(None, legacy, 'Custom', _generated_mtime(proj, target))
+
+        # Manifest order first (for entries still on disk), then orphan files.
+        order = [str(e['id']) for e in entries if isinstance(e, dict) and str(e.get('id')) in disk]
+        order += [s for s in sorted(disk) if s not in order]
+        reconciled, seen = [], set()
+        for slug in order:
+            if slug in disk and slug not in seen:
+                seen.add(slug)
+                reconciled.append(
+                    {
+                        'id': slug,
+                        'label': label_by_slug.get(slug) or slug.replace('-', ' '),
+                        'base_mtime': base_by_slug.get(slug),
+                    }
                 )
-            )
-        return {'original': original, 'custom': custom, 'diff': diff}
+        _write_index(proj, target, reconciled)
+        return reconciled
+
+    def _list_variants(proj: Project, target: str) -> list[dict]:
+        """Reconciled variants decorated with a derived 'stale' flag, for the UI."""
+        gen_mtime = _generated_mtime(proj, target)
+        out = []
+        for e in _reconcile_variants(proj, target):
+            base = e.get('base_mtime')
+            stale = bool(gen_mtime is not None and base is not None and gen_mtime > base + 1e-6)
+            out.append({'id': e['id'], 'label': e['label'], 'stale': stale})
+        return out
+
+    def _tuning_state(proj: Project, target: str, variant_id: str | None = None) -> dict:
+        """The Tuning tab's contents: original text, the selected variant's text + diff,
+        and the full variant list. variant_id picks which one's text/diff to return."""
+        _valid_target(target)
+        gen_path = _generated_path(proj, target)
+        if not gen_path.exists():
+            abort(404, 'No tuning file for that target')
+        original = gen_path.read_text()
+        variants = _list_variants(proj, target)
+        selected = None
+        if variant_id is not None and any(v['id'] == variant_id for v in variants):
+            selected = variant_id
+        elif variants:
+            selected = variants[0]['id']
+        custom = diff = None
+        if selected is not None:
+            cpath = _variant_path(proj, target, selected)
+            if cpath.exists():
+                custom = cpath.read_text()
+                diff = '\n'.join(
+                    difflib.unified_diff(
+                        original.splitlines(),
+                        custom.splitlines(),
+                        fromfile=gen_path.name,
+                        tofile=cpath.name,
+                        lineterm='',
+                    )
+                )
+        return {
+            'original': original,
+            'custom': custom,
+            'diff': diff,
+            'variants': variants,
+            'selected': selected,
+            'existing': _existing_tuning_text(proj, target),
+        }
 
     @app.route('/projects/<name>/tuning-data/<target>')
     def tuning_data(name: str, target: str):
-        """The Tuning tab's contents: original + custom text and their diff."""
+        """The Tuning tab's contents for a target, optionally for a chosen variant."""
         proj = get_project_or_404(name)
-        return jsonify(_tuning_state(proj, target))
+        return jsonify(_tuning_state(proj, target, request.args.get('variant') or None))
 
     @app.route('/projects/<name>/tuning/custom/<target>', methods=['POST'])
-    def save_custom_tuning(name: str, target: str):
-        """Save hand edits as the per-target custom tuning file (validated JSON)."""
+    def create_custom_tuning(name: str, target: str):
+        """Save hand edits as a new labelled custom variant (validated JSON)."""
         proj = get_project_or_404(name)
-        if target not in ctt_runner.VALID_TARGETS:
+        _valid_target(target)
+        body = request.get_json(force=True) or {}
+        label = (body.get('label') or '').strip()
+        if err := _validate_label(label):
+            return jsonify({'error': err}), 400
+        try:
+            json.loads(body.get('json', ''))
+        except json.JSONDecodeError as err:
+            return jsonify({'error': f'Invalid JSON: {err}'}), 400
+        taken = {v['id'] for v in _reconcile_variants(proj, target)}
+        if len(taken) >= MAX_VARIANTS:
+            return jsonify({'error': f'Too many custom variants (max {MAX_VARIANTS}) — remove one first.'}), 400
+        slug = _unique_slug(label, taken)
+        proj.output_dir.mkdir(parents=True, exist_ok=True)
+        _variant_path(proj, target, slug).write_text(body['json'])
+        entries = _read_index(proj, target)
+        entries.append({'id': slug, 'label': label, 'base_mtime': _generated_mtime(proj, target)})
+        _write_index(proj, target, entries)
+        return jsonify(_tuning_state(proj, target, slug))
+
+    @app.route('/projects/<name>/tuning/custom/<target>/<vid>', methods=['POST'])
+    def save_custom_tuning(name: str, target: str, vid: str):
+        """Save edits to an existing variant in place; refresh its staleness baseline."""
+        proj = get_project_or_404(name)
+        _valid_target(target)
+        slug = _valid_slug(vid)
+        path = _variant_path(proj, target, slug)
+        if not path.exists():
             abort(404)
         text = (request.get_json(force=True) or {}).get('json', '')
         try:
             json.loads(text)
         except json.JSONDecodeError as err:
             return jsonify({'error': f'Invalid JSON: {err}'}), 400
-        proj.output_dir.mkdir(parents=True, exist_ok=True)
-        _custom_tuning_path(proj, target).write_text(text)
-        return jsonify(_tuning_state(proj, target))
+        path.write_text(text)
+        entries = _reconcile_variants(proj, target)
+        for e in entries:
+            if e['id'] == slug:
+                e['base_mtime'] = _generated_mtime(proj, target)  # edits are now against the current original
+        _write_index(proj, target, entries)
+        return jsonify(_tuning_state(proj, target, slug))
 
-    @app.route('/projects/<name>/tuning/custom/<target>/delete', methods=['POST'])
-    def delete_custom_tuning(name: str, target: str):
-        """Revert to the original tuning: remove the custom file."""
+    @app.route('/projects/<name>/tuning/custom/<target>/<vid>/copy', methods=['POST'])
+    def copy_custom_tuning(name: str, target: str, vid: str):
+        """Duplicate a variant's contents under a new label."""
         proj = get_project_or_404(name)
-        if target not in ctt_runner.VALID_TARGETS:
+        _valid_target(target)
+        src = _variant_path(proj, target, _valid_slug(vid))
+        if not src.exists():
             abort(404)
-        _custom_tuning_path(proj, target).unlink(missing_ok=True)
+        label = ((request.get_json(force=True) or {}).get('label') or '').strip()
+        if err := _validate_label(label):
+            return jsonify({'error': err}), 400
+        taken = {v['id'] for v in _reconcile_variants(proj, target)}
+        if len(taken) >= MAX_VARIANTS:
+            return jsonify({'error': f'Too many custom variants (max {MAX_VARIANTS}) — remove one first.'}), 400
+        slug = _unique_slug(label, taken)
+        _variant_path(proj, target, slug).write_text(src.read_text())
+        entries = _read_index(proj, target)
+        entries.append({'id': slug, 'label': label, 'base_mtime': _generated_mtime(proj, target)})
+        _write_index(proj, target, entries)
+        return jsonify(_tuning_state(proj, target, slug))
+
+    @app.route('/projects/<name>/tuning/custom/<target>/<vid>/delete', methods=['POST'])
+    def delete_custom_tuning(name: str, target: str, vid: str):
+        """Remove a single custom variant (file + manifest entry)."""
+        proj = get_project_or_404(name)
+        _valid_target(target)
+        slug = _valid_slug(vid)
+        _variant_path(proj, target, slug).unlink(missing_ok=True)
+        _write_index(proj, target, [e for e in _read_index(proj, target) if str(e.get('id')) != slug])
         return jsonify(_tuning_state(proj, target))
 
     return app

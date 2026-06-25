@@ -4,18 +4,23 @@
 {% set active_tab = 'preview' %}
 {% include '_project_tabs.html' %}
 
-<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, runs: {{ runs|tojson }}, customs: {{ customs|tojson }}, hasTuning: {{ (files|length > 0)|tojson }}, autoPreview: true })' x-init="init()">
+<div x-data='resultsApp({ project: {{ project.name|tojson }}, targets: {{ files.keys()|list|tojson }}, runs: {{ runs|tojson }}, variants: {{ variants|tojson }}, hasTuning: {{ (files|length > 0)|tojson }}, autoPreview: true })' x-init="init()">
   <!-- Live preview test -->
   <div class="card">
     <div class="card-head">
       <h2>Live preview test</h2>
-      <div class="seg" x-show="testing" x-cloak>
-        <button type="button" :class="{active: testKind==='generated'}" @click="startPreviewTest()" :disabled="busy"
-                x-show="hasTuning" x-cloak>Tuned</button>
-        <button type="button" :class="{active: testKind==='custom'}" @click="startPreviewTest('custom')" :disabled="busy"
-                x-show="customs[testTarget]" x-cloak>Custom</button>
-        <button type="button" :class="{active: testKind==='standard'}" @click="previewStandard()" :disabled="busy">Existing</button>
-      </div>
+      <select class="mode-sel" x-show="testing" x-cloak :disabled="busy"
+              @change="previewSelect($event.target.value)"
+              title="Switch the live preview between the tuned result, a saved custom tuning, or the camera's existing tuning">
+        <template x-if="hasTuning">
+          <option value="generated" :selected="previewSel()==='generated'">Tuned</option>
+        </template>
+        <option value="standard" :selected="previewSel()==='standard'">System</option>
+        <template x-for="v in (variants[testTarget] || [])" :key="v.id">
+          <option :value="'custom:'+v.id" :selected="previewSel()==='custom:'+v.id"
+                  x-text="(v.stale ? '⚠ ' : '') + v.label"></option>
+        </template>
+      </select>
     </div>
     <div class="banner error mt" x-show="testError" x-text="testError" x-cloak></div>
     <p class="muted" x-show="!testing && hasTuning" x-cloak>
@@ -25,7 +30,7 @@
     </p>
     <p class="muted" x-show="!testing && !hasTuning" x-cloak>
       No generated tuning yet — <a href="{{ url_for('run_page', name=project.name) }}">Run CTT</a>
-      to create one. You can still preview the camera's <b>existing</b> (built-in) tuning live.
+      to create one. You can still preview the camera's <b>system</b> (built-in) tuning live.
     </p>
     <div class="btn-row">
       <button class="btn primary" x-show="!testing" @click="hasTuning ? startPreviewTest() : previewStandard()" :disabled="busy">
@@ -37,12 +42,6 @@
       <button class="btn ghost" x-show="testing" @click="restoreDefault()" :disabled="busy">■ Stop (restore default)</button>
     </div>
     <div x-show="testing" x-cloak>
-      <div class="muted mt">
-        <template x-if="testKind === 'standard'"><span>Previewing <b>default (built-in)</b> tuning</span></template>
-        <template x-if="testKind !== 'standard'">
-          <span>Previewing <b x-text="testTuning"></b> · <span x-text="testTarget && testTarget.toUpperCase()"></span><span x-show="genLabel()"> · generated <span x-text="genLabel()"></span></span></span>
-        </template>
-      </div>
       <div class="preview-wrap big mt" :class="{ louping: loupe.active }" @dragstart.prevent
            @pointerdown="loupeStart($event)" @pointermove="loupeMove($event)"
            @pointerup="loupeEnd($event)" @pointerleave="loupeEnd($event)" @pointercancel="loupeEnd($event)">
@@ -177,7 +176,7 @@
           <span x-text="colour && colour.colour"></span>
           <span class="muted" style="font-size:0.85rem" x-text="'mean ' + (colour && colour.mean) + ' · worst ' + (colour && colour.worst)"></span>
         </div>
-        <div class="l" x-text="'Colour ΔE — ' + (testKind === 'standard' ? 'existing' : 'tuned') + ' tuning'"></div>
+        <div class="l" x-text="'Colour ΔE — ' + (testKind === 'standard' ? 'system' : (testKind === 'custom' ? (testLabel || 'custom') : 'tuned')) + ' tuning'"></div>
       </div>
     </div>
     <div class="banner info mt" x-show="colour && colour.saturated" x-cloak>
