@@ -13,6 +13,8 @@ import json
 import math
 from pathlib import Path
 
+from ctt.utils.colorspace import gamut_reference
+
 # ISP grid dimensions (cols, rows) keyed by tuning-file target.
 _GRID = {'pisp': (32, 32), 'bcm2835': (16, 12)}
 
@@ -231,6 +233,9 @@ def parse_tuning_file(path: str | Path, metrics_path: str | Path | None = None) 
             'alsc': raw_metrics.get('alsc', {}),
             'black_level': raw_metrics.get('black_level', {}),
             'gamma': raw_metrics.get('gamma', {}),
+            # Static u'v' gamut geometry (primaries, white point, spectral locus)
+            # from the colour library, so the UI never hard-codes its own copy.
+            'gamut_reference': gamut_reference(),
         }
         if ccm_default:
             metrics['ccm_default'] = sorted(ccm_default, key=lambda c: c.get('ct', 0))

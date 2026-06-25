@@ -5,7 +5,7 @@
 import numpy as np
 import pytest
 
-from ctt.utils.colorspace import rgb_to_lab
+from ctt.utils.colorspace import rgb_to_lab, rgb_to_uv
 from ctt.utils.errors import ArgError
 from ctt.utils.tools import correlate, get_alsc_colour_cals, nudge_for_json, read_manifest, reshape
 
@@ -138,6 +138,42 @@ class TestRgbToLab:
         rgb = np.array([[255, 0, 0], [0, 255, 0], [0, 0, 255]])
         lab = rgb_to_lab(rgb)
         assert lab.shape == (3, 3)
+
+
+# --- rgb_to_uv ---
+
+
+class TestRgbToUv:
+    def test_neutral_is_d65(self):
+        # Any neutral grey sits at the D65 white point in u'v'.
+        assert rgb_to_uv([0.5, 0.5, 0.5]) == pytest.approx([0.1978, 0.4683], abs=1e-3)
+
+    def test_primaries_match_srgb(self):
+        # Pure linear-sRGB primaries land on the known sRGB primary chromaticities.
+        assert rgb_to_uv([1, 0, 0]) == pytest.approx([0.4507, 0.5229], abs=1e-3)
+        assert rgb_to_uv([0, 1, 0]) == pytest.approx([0.1250, 0.5625], abs=1e-3)
+        assert rgb_to_uv([0, 0, 1]) == pytest.approx([0.1754, 0.1579], abs=1e-3)
+
+    def test_scale_invariant(self):
+        # Chromaticity depends only on direction, not magnitude.
+        assert rgb_to_uv([0.2, 0.4, 0.1]) == pytest.approx(rgb_to_uv([2.0, 4.0, 1.0]), abs=1e-9)
+
+    def test_batch(self):
+        assert rgb_to_uv(np.array([[1, 0, 0], [0, 1, 0]])).shape == (2, 2)
+
+
+class TestGamutReference:
+    def test_primaries_and_whitepoint(self):
+        from ctt.utils.colorspace import gamut_reference
+
+        g = gamut_reference()
+        assert set(g) == {'srgb', 'rec2020', 'd65', 'locus'}
+        # sRGB red primary and D65 white, in u'v', from the colour library.
+        assert g['srgb'][0] == pytest.approx([0.4507, 0.5229], abs=1e-3)
+        assert g['d65'] == pytest.approx([0.1978, 0.4683], abs=1e-3)
+        # Rec.2020 has a wider gamut: its green sits at a lower u' than sRGB's.
+        assert g['rec2020'][1][0] < g['srgb'][1][0]
+        assert len(g['locus']) > 10 and all(len(p) == 2 for p in g['locus'])
 
 
 # --- read_manifest ---

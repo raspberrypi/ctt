@@ -27,7 +27,7 @@ from scipy.optimize import minimize, minimize_scalar
 
 from ..detection.patches import get_alsc_patches
 from ..output.visualise import visualise_macbeth_chart
-from ..utils.colorspace import rgb_to_lab
+from ..utils.colorspace import rgb_to_lab, rgb_to_uv
 from ..utils.tools import get_alsc_colour_cals, nudge_for_json
 from .base import CalibrationAlgorithm
 
@@ -176,6 +176,9 @@ def ccm(
     m_srgb = np.array([m_srgb[i::6] for i in range(6)]).reshape((24, 3))
     m_lab = np.array([m_lab[i::6] for i in range(6)]).reshape((24, 3))
     m_rgb = np.array([m_rgb[i::6] for i in range(6)]).reshape((24, 3))
+    # Reference chromaticity of each patch (fixed; the corrected chromaticity is
+    # computed per image below). Lets the UI draw a CIE u'v' gamut diagram.
+    ref_uv = rgb_to_uv(m_srgb)
 
     # For each image, perform AWB and ALSC corrections, then calculate the CCM for that image.
     ccm_tab = {}
@@ -291,9 +294,18 @@ def ccm(
 
         s_opt = minimize_scalar(_norm_mean_de, bounds=(0.5, 1.6), method='bounded').x
         de_norm = deltae_array(rgb_to_lab(s_opt * after_optimised_rgb_arr), m_lab)
+        # Corrected (post-CCM) chromaticity per patch, paired with the reference,
+        # so the UI can plot reference->corrected error vectors on a u'v' diagram.
+        corr_uv = rgb_to_uv(after_optimised_rgb_arr)
         patches = [
-            {'de': float(d), 'de_norm': float(dn), 'rgb': [int(v) for v in rgb]}
-            for d, dn, rgb in zip(de_after, de_norm, m_rgb, strict=True)
+            {
+                'de': float(d),
+                'de_norm': float(dn),
+                'rgb': [int(v) for v in rgb],
+                'uv_ref': [float(ur[0]), float(ur[1])],
+                'uv': [float(uc[0]), float(uc[1])],
+            }
+            for d, dn, rgb, ur, uc in zip(de_after, de_norm, m_rgb, ref_uv, corr_uv, strict=True)
         ]
         cam.metrics['ccm'].append(
             {

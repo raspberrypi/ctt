@@ -49,6 +49,22 @@
     </div>
   </template>
 
+  <!-- Colour gamut: CIE u'v' chromaticity of the corrected Macbeth patches -->
+  <div class="card mt" x-show="gamutHasData()" x-cloak>
+    <div class="card-head"><h2>Colour gamut (CIE u′v′)</h2></div>
+    <div class="seg mt" x-show="metrics && metrics.ccm && metrics.ccm.length > 1">
+      <template x-for="c in (metrics ? metrics.ccm : [])" :key="c.ct">
+        <button type="button" :class="{active: ccmCt === c.ct}" @click="setCcmCt(c.ct)" x-text="c.ct + 'K'"></button>
+      </template>
+    </div>
+    <div class="chart-box square mt"><canvas id="gamutChart"></canvas></div>
+    <p class="hint">Each Macbeth patch on the CIE 1976 u′v′ chromaticity diagram at the selected colour temperature:
+      the open circle is the reference colour, the filled dot is the camera's corrected (post-CCM) colour, and the line
+      between them is the residual hue/saturation error (shorter is better). The triangles are the sRGB/Rec.709 gamut
+      (solid — they share primaries) and Rec.2020 (dashed); ◇ is the D65 white point and the curved outline is the
+      spectral locus. This shows the <em>direction</em> of colour error that the ΔE bars only give as a magnitude.</p>
+  </div>
+
   <!-- AWB curve + ALSC falloff -->
   <div class="grid cols-2 mt" style="align-items: stretch">
 
