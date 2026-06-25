@@ -317,6 +317,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
    height; Chart.js sizes the <canvas> inside it (maintainAspectRatio:false). */
 .chart-box { position: relative; height: 260px; }
 .chart-box.compact { height: 200px; }
+/* Square box for the chromaticity diagram: u' and v' must share one scale, so the
+   plot area has to be square (equal axis ranges in renderGamut do the rest). */
+.chart-box.square { height: auto; aspect-ratio: 1 / 1; max-width: 640px; margin-inline: auto; }
 /* A card whose chart grows to fill the height set by its grid row (e.g. the
    AWB curve matching the taller ALSC card beside it). */
 .card.fill-chart { display: flex; flex-direction: column; }

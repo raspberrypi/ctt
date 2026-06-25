@@ -1297,7 +1297,54 @@ function resultsApp(cfg) {
     setCcmCt(ct) {
       this.ccmCt = ct;
       this._charts.ccm?.destroy();
-      this.$nextTick(() => requestAnimationFrame(() => { try { this.renderCcm(); } catch (e) { console.error(e); } }));
+      this._charts.gamut?.destroy();
+      this.$nextTick(() => requestAnimationFrame(() => {
+        try { this.renderCcm(); } catch (e) { console.error(e); }
+        try { this.renderGamut(); } catch (e) { console.error(e); }
+      }));
+    },
+    // The CCM step records per-patch chromaticity (u'v') only in newer sidecars.
+    gamutHasData() {
+      const e = this.ccmEntry();
+      return !!(e && (e.patches || []).some((p) => p.uv && p.uv_ref));
+    },
+
+    renderGamut() {
+      const entry = this.ccmEntry();
+      const ctx = document.getElementById('gamutChart');
+      if (!ctx) return;
+      this._charts.gamut?.destroy();
+      const patches = ((entry && entry.patches) || []).filter((p) => p.uv && p.uv_ref);
+      const ref = this.metrics && this.metrics.gamut_reference;
+      if (!patches.length || !ref) return;
+      const xy = ([u, v]) => ({ x: u, y: v });
+      const closed = (pts) => [...pts, pts[0]].map(xy);  // close the polygon
+      const colours = patches.map((p) => `rgb(${p.rgb[0]},${p.rgb[1]},${p.rgb[2]})`);
+      // Reference->corrected as one line dataset; null breaks split the segments.
+      const vectors = [];
+      patches.forEach((p) => vectors.push(xy(p.uv_ref), xy(p.uv), { x: null, y: null }));
+      const datasets = [
+        { type: 'line', label: 'spectral locus', data: closed(ref.locus),
+          borderColor: '#39455a', borderWidth: 1, pointRadius: 0, fill: false, tension: 0 },
+        { type: 'line', label: 'sRGB / Rec.709', data: closed(ref.srgb),
+          borderColor: '#9aa7b8', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0 },
+        { type: 'line', label: 'Rec.2020', data: closed(ref.rec2020),
+          borderColor: '#6b7888', borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0 },
+        { type: 'scatter', label: 'D65', data: [xy(ref.d65)],
+          pointStyle: 'rectRot', pointRadius: 6, backgroundColor: '#e8ecf3', borderColor: '#e8ecf3' },
+        { type: 'line', label: 'error', data: vectors, spanGaps: false,
+          borderColor: 'rgba(229,72,77,0.55)', borderWidth: 1, pointRadius: 0, fill: false },
+        { type: 'scatter', label: 'reference', data: patches.map((p) => xy(p.uv_ref)),
+          pointRadius: 4, backgroundColor: 'transparent', borderColor: colours, borderWidth: 1.5 },
+        { type: 'scatter', label: 'corrected', data: patches.map((p) => xy(p.uv)),
+          pointRadius: 4, backgroundColor: colours, borderColor: 'rgba(255,255,255,0.4)', borderWidth: 1 },
+      ];
+      // Equal ranges on both axes + a square box (.chart-box.square) keep one
+      // unit of u' the same length as one unit of v', so the locus isn't skewed.
+      const opts = chartOpts("CIE u'", "CIE v'");
+      opts.scales.x.type = 'linear'; opts.scales.x.min = 0; opts.scales.x.max = 0.65;
+      opts.scales.y.min = 0; opts.scales.y.max = 0.65;
+      this._charts.gamut = new Chart(ctx, { data: { datasets }, options: opts });
     },
 
     // Format a number for display (2 sig-figs-ish), passing through non-numbers.
@@ -1324,6 +1371,7 @@ function resultsApp(cfg) {
       try {
         if (this.metrics && this.metrics.ccm && this.metrics.ccm.length) this.renderCcm();
       } catch (e) { console.error('CCM chart:', e); }
+      try { if (this.gamutHasData()) this.renderGamut(); } catch (e) { console.error('Gamut chart:', e); }
       try {
         if (this.metrics && this.metrics.lux && (this.metrics.lux.samples || []).length) this.renderLux();
       } catch (e) { console.error('Lux chart:', e); }
