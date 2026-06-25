@@ -15,7 +15,7 @@
       <h2>Calibration results</h2>
       <div class="seg" x-show="hasDefault()" x-cloak>
         <button type="button" :class="{active: view==='new'}" @click="setView('new')">Tuned</button>
-        <button type="button" :class="{active: view==='old'}" @click="setView('old')">Existing</button>
+        <button type="button" :class="{active: view==='old'}" @click="setView('old')">System</button>
       </div>
     </div>
     <div class="muted mt" x-show="view==='new' && runLabel()" x-cloak>Generated <span x-text="runLabel()"></span></div>

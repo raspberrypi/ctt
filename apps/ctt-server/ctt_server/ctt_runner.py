@@ -229,14 +229,9 @@ def run_ctt_stream(
                 break
             yield item
         thread.join()
-        # A successful run regenerates the originals, so hand edits no longer
-        # apply: discard each run target's custom tuning file.
-        if result.get('code', 1) == 0:
-            for t in run_targets:
-                custom = project.output_dir / f'{project.name}_{t}_custom.json'
-                if custom.exists():
-                    custom.unlink()
-                    yield f'Discarded custom tuning edits for {t} (original regenerated)'
+        # Custom tuning variants persist across runs (the Tuning tab flags any
+        # that predate the regenerated original as stale via the manifest's
+        # base_mtime), so a successful run discards nothing here.
         yield f'CTT_EXIT {result.get("code", 1)}'
     finally:
         _run_lock.release()

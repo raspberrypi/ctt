@@ -438,3 +438,5 @@ td.mono { font-family: var(--mono); }
 
 /* sensor-mode dropdown in the preview info box */
 .caminfo .mode-sel { width: auto; padding: 3px 8px; font-size: 0.85rem; align-self: flex-start; }
+/* Preview tab: the live-tuning selector sits compact and right-justified in the card head. */
+.card-head .mode-sel { width: auto; min-width: 220px; max-width: 60%; }

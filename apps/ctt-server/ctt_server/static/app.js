@@ -799,23 +799,27 @@ function resultsApp(cfg) {
     alscHover: null,             // {col,row,r,g,b} gains under the cursor on the ALSC grid
     runs: cfg.runs || {}, // target -> {label, epoch}: when each tuning file was generated
     autoPreview: cfg.autoPreview || false,  // Preview page: start the live test on load
-    customs: cfg.customs || {},  // Preview page: target -> custom tuning file exists
+    variants: cfg.variants || {},  // Preview page: target -> [{id, label, stale}]
     hasTuning: cfg.hasTuning || false,  // Preview page: any generated tuning exists yet
-    // Tuning page: original/custom file text + diff, viewer/editor state.
-    tuningState: { original: null, custom: null, diff: null },
-    tuningView: 'custom', // which text the contents box shows when a custom exists
+    // Tuning page: original text + the selected variant's text/diff + variant list.
+    tuningState: { original: null, custom: null, diff: null, variants: [], selected: null, existing: null },
+    tuningSel: 'original', // dropdown value: 'original' | 'existing' | '<variant slug>'
+    variantId: null,       // the selected variant's slug (null for Original/Existing)
     tuningHtml: '',       // highlighted text of the selected view
     diffHtml: '',
     editing: false,
     editorText: '',
     tuningError: '',
+    _tuningReq: 0,        // monotonic token guarding against stale tuning-data fetches
     _charts: {},
     // live preview test
     busy: false,
     testing: false,
     testTarget: null,
     testTuning: null,
-    testKind: null,       // 'generated' | 'standard' — which tuning is live
+    testKind: null,       // 'generated' | 'custom' | 'standard' — which tuning is live
+    testVariant: null,    // selected custom variant id (when testKind === 'custom')
+    testLabel: null,      // selected custom variant label, for captions + the ΔE legend
     previewSrc: '',
     testError: '',
     hflip: false,         // preview page: sensor flips, applied to the live test camera
@@ -893,18 +897,19 @@ function resultsApp(cfg) {
       this.$nextTick(() => requestAnimationFrame(() => { try { this.renderAlsc(); } catch (e) { console.error(e); } }));
     },
 
-    async startPreviewTest(kind = 'generated') {
+    async startPreviewTest(kind = 'generated', variant = null) {
       this.busy = true; this.testError = '';
       // Switching tuning while already previewing carries the exposure panel over.
       const keep = this._exposureState();
       try {
         const r = await fetch(`/projects/${this.project}/preview-test`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ kind }),
+          body: JSON.stringify({ kind, variant }),
         });
         const d = await r.json();
         if (!r.ok) { this.testError = d.error || 'Failed to start preview'; return; }
         this.testTarget = d.target; this.testTuning = d.tuning; this.testKind = d.kind || 'generated';
+        this.testVariant = d.variant; this.testLabel = d.label;
         this.testing = true;
         // Cache-bust so the <img> opens a fresh MJPEG stream on the new camera.
         this.previewSrc = '/api/preview?t=' + Date.now();
@@ -918,6 +923,19 @@ function resultsApp(cfg) {
     },
 
     genLabel() { return (this.runs[this.testTarget] || {}).label || ''; },
+
+    // Preview tab: the live-tuning dropdown's current value and its change handler.
+    // Values are 'generated' (Tuned), 'standard' (Existing) or 'custom:<id>'.
+    previewSel() {
+      if (this.testKind === 'standard') return 'standard';
+      if (this.testKind === 'custom') return `custom:${this.testVariant}`;
+      return 'generated';
+    },
+    previewSelect(val) {
+      if (val === 'standard') return this.previewStandard();
+      if (val && val.startsWith('custom:')) return this.startPreviewTest('custom', val.slice(7));
+      return this.startPreviewTest('generated');
+    },
 
     // The exposure-panel state to carry across a tuning switch, or null on the
     // first start (nothing chosen yet — adopt the reloaded camera's defaults).
@@ -1148,7 +1166,9 @@ function resultsApp(cfg) {
       const ctx = document.getElementById('liveDeChart');
       const d = this.colour;
       if (!ctx || !d) return;
-      const label = `ΔE · ${{ standard: 'existing', custom: 'custom' }[this.testKind] || 'tuned'}`;
+      const name = this.testKind === 'standard' ? 'system'
+        : (this.testKind === 'custom' ? (this.testLabel || 'custom') : 'tuned');
+      const label = `ΔE · ${name}`;
       const chart = this._charts.livede;
       if (chart) {
         // Update in place: a destroy/recreate every poll would flicker.
@@ -1208,7 +1228,7 @@ function resultsApp(cfg) {
 
     async select(t) {
       this.target = t;
-      if (cfg.showJson) this.loadTuningData(t);
+      if (cfg.showJson) this.loadTuningData(t);  // adopt the target's default selection
       const r = await fetch(`/projects/${this.project}/results/data?target=${t}`);
       if (!r.ok) return;
       const data = await r.json();
@@ -1224,55 +1244,122 @@ function resultsApp(cfg) {
       this.$nextTick(() => requestAnimationFrame(() => this.renderCharts()));
     },
 
-    // Tuning page: fetch the selected target's original/custom text + diff.
-    async loadTuningData(t) {
+    // Tuning page: fetch the selected target's original text + the chosen
+    // variant's text/diff. variantId null/undefined sends no ?variant; the server
+    // returns the first variant, which an initial load (undefined) adopts.
+    // Load the tuning-data for target t and show selection `sel`: 'original',
+    // 'existing' (built-in), or a variant slug. undefined keeps/adopts the
+    // default (the server's first variant, else Original).
+    async loadTuningData(t, sel = undefined) {
       this.tuningHtml = ''; this.diffHtml = ''; this.editing = false; this.tuningError = '';
+      const token = ++this._tuningReq;
+      const wantVariant = (sel && sel !== 'original' && sel !== 'existing') ? sel : null;
       try {
-        const r = await fetch(`/projects/${this.project}/tuning-data/${t}`);
+        const q = wantVariant ? `?variant=${encodeURIComponent(wantVariant)}` : '';
+        const r = await fetch(`/projects/${this.project}/tuning-data/${t}${q}`);
         if (!r.ok) return;
         const s = await r.json();
-        if (this.target !== t) return;  // ignore a stale fetch after a quick re-switch
+        if (this.target !== t || token !== this._tuningReq) return;  // ignore a stale fetch
         this.tuningState = s;
-        this.tuningView = s.custom !== null ? 'custom' : 'original';
+        this.tuningSel = sel !== undefined ? sel : (s.selected || 'original');
+        this._syncVariantId();
         this.renderTuning();
       } catch (e) { /* box stays empty */ }
     },
 
-    renderTuning() {
-      const s = this.tuningState;
-      const text = (this.tuningView === 'custom' && s.custom !== null) ? s.custom : (s.original || '');
-      this.tuningHtml = highlightJson(text);
-      this.diffHtml = s.diff ? highlightDiff(s.diff) : '';
+    // variantId is the slug only when a real variant is shown (drives Edit/Copy/
+    // Remove/Download); null for Original or Existing.
+    _syncVariantId() {
+      this.variantId = (this.tuningSel === 'original' || this.tuningSel === 'existing') ? null : this.tuningSel;
     },
 
-    setTuningView(v) { this.tuningView = v; this.renderTuning(); },
+    // The text currently shown in the contents box (original / existing / variant).
+    _shownText() {
+      const s = this.tuningState;
+      if (this.tuningSel === 'existing') return s.existing || '';
+      if (this.variantId != null && s.custom != null) return s.custom;
+      return s.original || '';
+    },
+
+    renderTuning() {
+      this.tuningHtml = highlightJson(this._shownText());
+      // Only a saved variant has a diff against the generated original.
+      this.diffHtml = (this.variantId != null && this.tuningState.diff) ? highlightDiff(this.tuningState.diff) : '';
+    },
+
+    // Switch the contents box: 'original' | 'existing' | '<variant slug>'.
+    selectTuning(v) {
+      this.loadTuningData(this.target, v || 'original');
+    },
 
     startEdit() {
-      this.editorText = this.tuningState.custom ?? this.tuningState.original ?? '';
+      this.editorText = this._shownText();  // seed from whatever is shown (original/existing/variant)
       this.editing = true; this.tuningError = '';
     },
 
+    // Adopt a fresh tuning-state response: update state, select the affected
+    // variant (or fall back to Original), leave the editor.
+    _applyTuningState(d) {
+      this.tuningState = d;
+      this.tuningSel = d.selected || 'original';
+      this._syncVariantId();
+      this.editing = false; this.tuningError = '';
+      this.renderTuning();
+    },
+
+    // Save the editor contents back to the selected variant, in place.
     async saveEdit() {
+      if (this.variantId == null) return this.saveAsNew();  // nothing selected → it needs a label
       try {
-        const r = await fetch(`/projects/${this.project}/tuning/custom/${this.target}`, {
+        const r = await fetch(`/projects/${this.project}/tuning/custom/${this.target}/${this.variantId}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ json: this.editorText }),
         });
         const d = await r.json();
         if (!r.ok) { this.tuningError = d.error || 'Save failed'; return; }
-        this.tuningState = d; this.tuningView = 'custom'; this.editing = false; this.tuningError = '';
-        this.renderTuning();
+        this._applyTuningState(d);
       } catch (e) { this.tuningError = 'Save request failed'; }
     },
 
-    async revertCustom() {
-      if (!confirm('Discard the custom edits and revert to the original tuning?')) return;
+    // Save the editor contents as a brand-new labelled variant.
+    async saveAsNew() {
+      const label = (prompt('Name this custom tuning:') || '').trim();
+      if (!label) return;
       try {
-        const r = await fetch(`/projects/${this.project}/tuning/custom/${this.target}/delete`, { method: 'POST' });
+        const r = await fetch(`/projects/${this.project}/tuning/custom/${this.target}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label, json: this.editorText }),
+        });
+        const d = await r.json();
+        if (!r.ok) { this.tuningError = d.error || 'Save failed'; return; }
+        this._applyTuningState(d);
+      } catch (e) { this.tuningError = 'Save request failed'; }
+    },
+
+    // Duplicate the selected variant under a new label.
+    async copyVariant() {
+      if (this.variantId == null) return;
+      const label = (prompt('Name for the copy:') || '').trim();
+      if (!label) return;
+      try {
+        const r = await fetch(`/projects/${this.project}/tuning/custom/${this.target}/${this.variantId}/copy`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label }),
+        });
+        const d = await r.json();
+        if (!r.ok) { this.tuningError = d.error || 'Copy failed'; return; }
+        this._applyTuningState(d);
+      } catch (e) { this.tuningError = 'Copy request failed'; }
+    },
+
+    // Remove the selected variant; the server returns the new default selection.
+    async removeVariant() {
+      if (this.variantId == null) return;
+      if (!confirm('Remove this custom tuning?')) return;
+      try {
+        const r = await fetch(`/projects/${this.project}/tuning/custom/${this.target}/${this.variantId}/delete`, { method: 'POST' });
         if (!r.ok) return;
-        this.tuningState = await r.json();
-        this.tuningView = 'original'; this.editing = false;
-        this.renderTuning();
+        this._applyTuningState(await r.json());
       } catch (e) { /* keep the current view */ }
     },
 
