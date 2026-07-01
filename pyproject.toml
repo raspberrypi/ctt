@@ -22,6 +22,11 @@ dependencies = [
     "scipy>=1.17",
 ]
 
+[project.urls]
+Homepage = "https://github.com/raspberrypi/ctt"
+Repository = "https://github.com/raspberrypi/ctt"
+Documentation = "https://github.com/raspberrypi/ctt/blob/main/README.md"
+
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
 # ctt-server web frontend (web UI + in-process capture + CTT). Lives in apps/ctt-server.
