@@ -46,7 +46,7 @@ ctt = "ctt.ctt:main"
 # ctt-server web UI (Flask). See docs/ctt-server.md.
 ctt-server = "ctt_server.__main__:main"
 # Lightbox control CLI. See apps/ctt/ctt/devices/.
-ctt-lightbox = "ctt.devices.__main__:main"
+ctt-lightbox = "ctt.devices.lightbox_cli:main"
 
 [tool.setuptools.packages.find]
 # Discover the ctt CLI under apps/ctt and the web app under apps/ctt-server.

@@ -6,7 +6,7 @@
 
 import pytest
 
-from ctt.devices import Lightbox, LightboxError, get_lightbox, register_driver, registry
+from ctt.devices import Lightbox, LightboxError, get_lightbox, register_lightbox_driver, registry
 
 
 class FakeBox(Lightbox):
@@ -47,10 +47,10 @@ class FakeBox(Lightbox):
 @pytest.fixture
 def clean_registry():
     """Restore the driver registry after each test that mutates it."""
-    saved = list(registry.DRIVERS)
+    saved = list(registry.LIGHTBOX_DRIVERS)
     registry._SHARED = None
     yield
-    registry.DRIVERS[:] = saved
+    registry.LIGHTBOX_DRIVERS[:] = saved
     registry._SHARED = None
 
 
@@ -117,7 +117,7 @@ def test_context_manager_closes():
 
 
 def test_registry_factory_returns_registered_driver(clean_registry):
-    register_driver(FakeBox)
+    register_lightbox_driver(FakeBox)
     box = get_lightbox()
     # The real LightStudioS driver probes first and finds nothing (no hardware),
     # so the factory should fall through to our FakeBox.
@@ -142,9 +142,9 @@ def test_registry_skips_absent_driver(clean_registry):
 
         def close(self): ...
 
-    registry.DRIVERS[:] = [Absent]
+    registry.LIGHTBOX_DRIVERS[:] = [Absent]
     with pytest.raises(LightboxError, match='no supported lightbox'):
         get_lightbox()
 
-    register_driver(FakeBox)
+    register_lightbox_driver(FakeBox)
     assert isinstance(get_lightbox(), FakeBox)
