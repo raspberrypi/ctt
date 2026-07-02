@@ -5,7 +5,7 @@
 # Run the CTT in-process and stream its progress.
 #
 # We call ctt.core.runner.run_ctt_targets directly (the same shared pipeline the
-# CLI uses) rather than spawning `python -m ctt`. CTT routes all progress through the
+# CLI uses) rather than spawning the ctt CLI as a subprocess. CTT routes all progress through the
 # `logging` module, so we capture it by attaching a handler to the `ctt` logger
 # and relaying each line to the browser over SSE. The calibration runs in a
 # worker thread so the SSE generator can stream lines as they are produced.

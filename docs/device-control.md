@@ -1,11 +1,11 @@
 # Device control
 
-`ctt.devices` provides a small, generic API for controlling an illumination lightbox
+The top-level `devices` package provides a small, generic API for controlling an illumination lightbox
 over USB from the Pi, so a calibration run can set repeatable illuminants
 programmatically. Consumers use the abstract `Lightbox` interface and the
 device-agnostic factory; concrete drivers (currently **Image Engineering
 lightSTUDIO-S**) plug in behind it. A new lightbox is added as a driver package under
-`apps/ctt/ctt/devices/<model>/` registered in `apps/ctt/ctt/devices/registry.py` — no
+`devices/<model>/` registered in `devices/registry.py` — no
 change to the generic API or its consumers.
 
 ## Install (on the Pi)
@@ -17,7 +17,7 @@ pip install -e ".[devices]"               # or ".[server,devices]" with the web 
 sudo apt install libusb-1.0-0             # pyusb's backend
 
 # allow non-root USB access (lightSTUDIO-S)
-sudo cp apps/ctt/ctt/devices/lightstudio_s/contrib/99-lightstudio.rules /etc/udev/rules.d/
+sudo cp devices/lightstudio_s/contrib/99-lightstudio.rules /etc/udev/rules.d/
 sudo udevadm control --reload && sudo udevadm trigger
 ```
 
@@ -37,8 +37,8 @@ be staged on an inactive channel (the only stored per-channel value is the
 device's power-on default).
 
 ```python
-from ctt.devices import get_lightbox
-from ctt.devices.lightstudio_s import Illuminant
+from devices import get_lightbox
+from devices.lightstudio_s import Illuminant
 
 with get_lightbox() as box:               # first attached, supported lightbox
     box.set_illuminant('D65')             # switch to D65 at its default intensity
