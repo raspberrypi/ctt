@@ -16,11 +16,11 @@ import logging
 import sys
 from pathlib import Path
 
-from .core.runner import get_platform, get_target_from_tuning_file, run_ctt_targets
-from .output.converter import convert_v2
-from .output.json_formatter import pretty_print
-from .utils.errors import ArgError
-from .utils.tools import read_manifest
+from ctt.core.runner import get_platform, get_target_from_tuning_file, run_ctt_targets
+from ctt.output.converter import convert_v2
+from ctt.output.json_formatter import pretty_print
+from ctt.utils.errors import ArgError
+from ctt.utils.tools import read_manifest
 
 # Optional ANSI styling (disabled when not a TTY)
 _USE_COLOR = sys.stdout.isatty()

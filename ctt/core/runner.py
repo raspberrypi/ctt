@@ -4,7 +4,7 @@
 #
 # Camera tuning tool - core calibration pipeline.
 #
-# This is the shared library that both the CLI (ctt.ctt) and the web server
+# This is the shared library that both the CLI (ctt_cli.cli) and the web server
 # (ctt_server.ctt_runner) call into. It owns platform/template resolution and
 # the calibration run itself; the callers only supply inputs and consume the
 # progress emitted through the `ctt` logger.
