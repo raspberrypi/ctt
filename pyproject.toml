@@ -45,7 +45,7 @@ dev = ["pre-commit>=4.0"]
 ctt = "ctt_cli.cli:main"
 # ctt-server web UI (Flask). See docs/ctt-server.md.
 ctt-server = "ctt_server.__main__:main"
-# Lightbox control CLI. See apps/ctt/ctt/devices/.
+# Lightbox control CLI. See the top-level devices/ package.
 ctt-lightbox = "devices.lightbox_cli:main"
 
 [tool.setuptools.packages.find]
