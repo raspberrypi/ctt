@@ -29,7 +29,7 @@ Documentation = "https://github.com/raspberrypi/ctt/blob/main/README.md"
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
-# ctt-server web frontend (web UI + in-process capture + CTT). Lives in apps/ctt-server.
+# ctt-server web frontend (web UI + in-process capture + CTT). Lives in apps/ctt_server.
 # Runs on the Raspberry Pi; picamera2 is a system package (ships with Pi OS), imported
 # lazily, so it is intentionally not a pip dependency here.
 server = ["flask>=3.0"]
@@ -51,7 +51,7 @@ ctt-lightbox = "devices.lightbox_cli:main"
 [tool.setuptools.packages.find]
 # Discover the top-level ctt / devices packages at the repo root, and the
 # ctt_cli / ctt_server apps under apps/.
-where = [".", "apps", "apps/ctt-server"]
+where = [".", "apps"]
 include = ["ctt*", "devices*", "ctt_cli*", "ctt_server*"]
 
 [tool.setuptools.package-data]
@@ -67,7 +67,7 @@ target-version = "py311"
 line-length = 120
 # First-party source roots (the apps live under apps/), so import sorting keeps
 # ctt / ctt_server grouped as first-party.
-src = [".", "apps", "apps/ctt-server"]
+src = [".", "apps"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
