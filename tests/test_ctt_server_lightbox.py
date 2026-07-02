@@ -7,8 +7,8 @@
 
 import pytest
 
-from ctt.devices import LightboxError, LightboxState
 from ctt_server import app as app_module
+from devices import LightboxError, LightboxState
 
 
 class FakeBox:

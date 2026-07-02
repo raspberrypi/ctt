@@ -35,7 +35,7 @@ test = ["pytest>=8.0"]
 server = ["flask>=3.0"]
 # Optional: control a USB lightbox (e.g. Image Engineering lightSTUDIO-S) from the
 # Pi. pyusb is lazy-imported so core CTT is unaffected; also needs a libusb backend
-# (sudo apt install libusb-1.0-0). See apps/ctt/ctt/devices/.
+# (sudo apt install libusb-1.0-0). See the top-level devices/ package.
 devices = ["pyusb>=1.2"]
 # Developer tooling: lint/format hooks run via pre-commit (config in .pre-commit-config.yaml).
 # After `pip install -e ".[dev]"`, enable the hooks once with `pre-commit install`.
@@ -46,16 +46,17 @@ ctt = "ctt.ctt:main"
 # ctt-server web UI (Flask). See docs/ctt-server.md.
 ctt-server = "ctt_server.__main__:main"
 # Lightbox control CLI. See apps/ctt/ctt/devices/.
-ctt-lightbox = "ctt.devices.lightbox_cli:main"
+ctt-lightbox = "devices.lightbox_cli:main"
 
 [tool.setuptools.packages.find]
-# Discover the ctt CLI under apps/ctt and the web app under apps/ctt-server.
-where = ["apps/ctt", "apps/ctt-server"]
-include = ["ctt*", "ctt_server*"]
+# Discover the top-level ctt / devices packages at the repo root, the ctt CLI
+# under apps/ctt and the web app under apps/ctt-server.
+where = [".", "apps/ctt", "apps/ctt-server"]
+include = ["ctt*", "devices*", "ctt_server*"]
 
 [tool.setuptools.package-data]
 "ctt.data" = ["*.pgm", "*.json"]
-"ctt.devices.lightstudio_s" = ["contrib/*.rules"]
+"devices.lightstudio_s" = ["contrib/*.rules"]
 "ctt_server" = ["templates/*.html", "static/*", "static/**/*"]
 
 [tool.pytest.ini_options]
@@ -66,7 +67,7 @@ target-version = "py311"
 line-length = 120
 # First-party source roots (the apps live under apps/), so import sorting keeps
 # ctt / ctt_server grouped as first-party.
-src = ["apps/ctt", "apps/ctt-server"]
+src = [".", "apps/ctt", "apps/ctt-server"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]

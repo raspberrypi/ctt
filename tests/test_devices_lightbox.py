@@ -2,11 +2,11 @@
 #
 # Copyright (C) 2026, Raspberry Pi
 #
-# Tests for the generic ctt.devices lightbox API and driver registry.
+# Tests for the generic devices lightbox API and driver registry.
 
 import pytest
 
-from ctt.devices import Lightbox, LightboxError, get_lightbox, register_lightbox_driver, registry
+from devices import Lightbox, LightboxError, get_lightbox, register_lightbox_driver, registry
 
 
 class FakeBox(Lightbox):

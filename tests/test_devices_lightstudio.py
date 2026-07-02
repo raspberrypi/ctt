@@ -2,14 +2,14 @@
 #
 # Copyright (C) 2026, Raspberry Pi
 #
-# Tests for the lightSTUDIO-S driver (ctt.devices.lightstudio_s). Hardware-free:
+# Tests for the lightSTUDIO-S driver (devices.lightstudio_s). Hardware-free:
 # they bypass __init__ and drive a fake ctrl_transfer recorder, so they exercise the
 # decoded protocol without pyusb or a device.
 
 import pytest
 
-from ctt.devices import LightboxError
-from ctt.devices.lightstudio_s import CHANNEL_LABELS, CHANNEL_NAMES, CHANNEL_TEMPS, Illuminant, LightStudioS
+from devices import LightboxError
+from devices.lightstudio_s import CHANNEL_LABELS, CHANNEL_NAMES, CHANNEL_TEMPS, Illuminant, LightStudioS
 
 
 def _bare():

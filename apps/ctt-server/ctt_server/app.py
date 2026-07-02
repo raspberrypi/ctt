@@ -29,7 +29,7 @@ from flask import (
     url_for,
 )
 
-from ctt.devices import LightboxError, get_shared_lightbox
+from devices import LightboxError, get_shared_lightbox
 
 from . import colour_check, ctt_runner, mtf, results
 from .camera import (
