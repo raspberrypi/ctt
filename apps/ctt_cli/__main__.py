@@ -2,8 +2,8 @@
 #
 # Copyright (C) 2026, Raspberry Pi
 #
-# python -m ctt entry point
+# python -m ctt_cli entry point
 
-from .ctt import main
+from .cli import main
 
 main()
