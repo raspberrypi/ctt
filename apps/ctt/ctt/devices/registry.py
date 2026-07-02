@@ -6,7 +6,7 @@
 #
 # This is the only module that imports concrete drivers, so the generic interface in
 # lightbox.py stays dependency-free. Add a new device by appending its driver class
-# to DRIVERS here, or by calling register_driver() at runtime.
+# to LIGHTBOX_DRIVERS here, or by calling register_lightbox_driver() at runtime.
 
 from __future__ import annotations
 
@@ -19,13 +19,13 @@ from .lightstudio_s import LightStudioS
 logger = logging.getLogger(__name__)
 
 # Known lightbox drivers, tried in order by get_lightbox().
-DRIVERS: list[type[Lightbox]] = [LightStudioS]
+LIGHTBOX_DRIVERS: list[type[Lightbox]] = [LightStudioS]
 
 
-def register_driver(driver: type[Lightbox]) -> None:
+def register_lightbox_driver(driver: type[Lightbox]) -> None:
     """Register an additional lightbox driver (e.g. an out-of-tree device)."""
-    if driver not in DRIVERS:
-        DRIVERS.append(driver)
+    if driver not in LIGHTBOX_DRIVERS:
+        LIGHTBOX_DRIVERS.append(driver)
 
 
 def get_lightbox(serial: str | None = None) -> Lightbox:
@@ -34,7 +34,7 @@ def get_lightbox(serial: str | None = None) -> Lightbox:
     Walks the driver registry calling each driver's probe(); raises LightboxError if
     no supported device is present.
     """
-    for driver in DRIVERS:
+    for driver in LIGHTBOX_DRIVERS:
         try:
             box = driver.probe(serial)
         except LightboxError:  # pragma: no cover - probe should return None, not raise
