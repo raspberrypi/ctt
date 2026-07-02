@@ -5,9 +5,9 @@
 # Generic lightbox / illumination-device API.
 #
 # Consumers program against the abstract Lightbox interface and the device-agnostic
-# factory in ctt.devices (get_lightbox / get_shared_lightbox); concrete drivers (e.g.
-# ctt.devices.lightstudio_s.LightStudioS) implement this contract and are registered
-# in ctt.devices.registry. Adding a new lightbox is a new driver package plus one
+# factory in devices (get_lightbox / get_shared_lightbox); concrete drivers (e.g.
+# devices.lightstudio_s.LightStudioS) implement this contract and are registered
+# in devices.registry. Adding a new lightbox is a new driver package plus one
 # registry entry — no change here or in any consumer.
 #
 # This module has no hardware dependencies (drivers import it, not vice-versa).

@@ -2,7 +2,7 @@
 #
 # Copyright (C) 2026, Raspberry Pi
 #
-# Image Engineering lightSTUDIO-S driver (a concrete ctt.devices.Lightbox).
+# Image Engineering lightSTUDIO-S driver (a concrete devices.Lightbox).
 #
 # Non-root access on the Pi: install contrib/99-lightstudio.rules to
 # /etc/udev/rules.d/ then `sudo udevadm control --reload && sudo udevadm trigger`.

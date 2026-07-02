@@ -3,7 +3,7 @@
 # Copyright (C) 2026, Raspberry Pi
 #
 # Device-agnostic lightbox CLI (console script `ctt-lightbox`). Works against any
-# registered ctt.devices.Lightbox driver via the get_lightbox() factory.
+# registered devices.Lightbox driver via the get_lightbox() factory.
 
 from __future__ import annotations
 
