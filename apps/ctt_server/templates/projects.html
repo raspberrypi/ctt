@@ -24,10 +24,17 @@
             <td>{{ c.macbeth }}</td><td>{{ c.alsc }}</td><td>{{ c.cac }}</td><td>{{ c.dark }}</td>
             <td class="muted">{{ p.created_at[:10] }}</td>
             <td>
-              <form method="post" action="{{ url_for('delete_project', name=p.name) }}"
-                    onsubmit="return confirm('Delete project {{ p.name }} and all its images?')" style="margin:0">
-                <button class="btn sm danger">Delete</button>
-              </form>
+              <div style="display:flex; gap:8px; justify-content:flex-end">
+                <form method="post" action="{{ url_for('rename_project', name=p.name) }}"
+                      data-current="{{ p.name }}" onsubmit="return renamePrompt(this)" style="margin:0">
+                  <input type="hidden" name="new_name">
+                  <button class="btn sm" type="submit">Rename</button>
+                </form>
+                <form method="post" action="{{ url_for('delete_project', name=p.name) }}"
+                      onsubmit="return confirm('Delete project {{ p.name }} and all its images?')" style="margin:0">
+                  <button class="btn sm danger">Delete</button>
+                </form>
+              </div>
             </td>
           </tr>
         {% endfor %}
@@ -61,5 +68,16 @@
     const el = document.getElementById('name');
     if (el && !el.value && h && h.camera && h.model) el.value = h.model;
   }).catch(() => {});
+
+  // Prompt for the new name and stash it in the form's hidden field before submit.
+  function renamePrompt(form) {
+    const current = form.dataset.current || '';
+    const next = prompt('Rename project to:', current);
+    if (next === null) return false;                  // cancelled
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === current) return false;  // empty or unchanged: no-op
+    form.querySelector('input[name="new_name"]').value = trimmed;
+    return true;
+  }
 </script>
 {% endblock %}

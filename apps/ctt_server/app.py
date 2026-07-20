@@ -233,6 +233,27 @@ def create_app(workspace_root: str | None = None) -> Flask:
         workspace().delete_project(name)
         return redirect(url_for('projects'))
 
+    @app.route('/projects/<name>/rename', methods=['POST'])
+    def rename_project(name: str):
+        get_project_or_404(name)  # 404 if the source project is gone
+
+        def _projects_error(message: str):
+            return render_template(
+                'projects.html',
+                projects=workspace().list_projects(),
+                workspace_root=str(workspace().root),
+                error=message,
+            )
+
+        if ctt_runner.is_running():
+            return _projects_error('A calibration is running; wait for it to finish before renaming.')
+        new_name = request.form.get('new_name', '').strip()
+        try:
+            project = workspace().rename_project(name, new_name)
+        except (ValueError, FileExistsError) as err:
+            return _projects_error(str(err))
+        return redirect(url_for('project', name=project.name))
+
     @app.route('/projects/<name>')
     def project(name: str):
         proj = get_project_or_404(name)

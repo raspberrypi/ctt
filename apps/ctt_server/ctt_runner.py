@@ -29,6 +29,11 @@ _run_lock = threading.Lock()
 _SENTINEL = object()
 
 
+def is_running() -> bool:
+    """True while a calibration holds the run lock (only one runs at a time)."""
+    return _run_lock.locked()
+
+
 _CCM_MATRIX_SELECTIONS = ('average', 'maximum', 'patches')
 
 
