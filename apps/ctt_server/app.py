@@ -679,9 +679,10 @@ def create_app(workspace_root: str | None = None) -> Flask:
             # Restrict to the installed tuning directories so a request can't read
             # arbitrary files off the Pi via this endpoint.
             src = Path(system_path)
-            plat = platform_target()
-            allowed = plat is not None and src.resolve().parent in {d.resolve() for d in _system_tuning_dirs(plat)}
-            if not allowed or not src.is_file():
+            # Accept a file from either platform's installed tuning dirs (a tuning is
+            # platform-specific; the target is read from the file's own contents below).
+            allowed_dirs = {d.resolve() for plat in ('pisp', 'vc4') for d in _system_tuning_dirs(plat)}
+            if src.resolve().parent not in allowed_dirs or not src.is_file():
                 return jsonify({'error': 'Not an installed tuning file'}), 400
             try:
                 text = src.read_text(encoding='utf-8')
@@ -711,30 +712,35 @@ def create_app(workspace_root: str | None = None) -> Flask:
 
     @app.route('/projects/<name>/run/system-tunings')
     def system_tunings(name: str):
-        """List installed libcamera tunings for this Pi's ISP, for the update base.
+        """List installed libcamera tunings for both ISP platforms, for the update base.
 
-        Defaults the selection to the file matching the live sensor model (e.g.
-        imx708.json), so an update can be seeded from the camera's stock tuning.
+        Each entry is tagged with its platform ('pisp'/'vc4') so the UI can drive the
+        run target from the chosen file (a tuning is platform-specific). Defaults to the
+        file matching the live sensor model on the live ISP, so an update seeds from the
+        camera's own stock tuning by default.
         """
         get_project_or_404(name)
-        target = platform_target()
-        if target is None:
-            return jsonify({'error': 'Could not determine the camera ISP platform.'}), 503
+        live = platform_target()  # the running ISP; used only to pick a sensible default
         model = None
         with contextlib.suppress(CameraError):
             model = get_shared_camera().model
         files: list[dict] = []
-        seen: set[str] = set()
-        for d in _system_tuning_dirs(target):
-            if d.is_dir():
-                for f in sorted(d.glob('*.json')):
-                    if f.name not in seen:  # /usr/local entry wins over /usr/share
-                        seen.add(f.name)
-                        files.append({'name': f.name, 'path': str(f)})
-        default = next((f['path'] for f in files if model and f['name'] == f'{model}.json'), None)
+        seen: set[tuple[str, str]] = set()
+        for plat in ('pisp', 'vc4'):
+            for d in _system_tuning_dirs(plat):
+                if d.is_dir():
+                    for f in sorted(d.glob('*.json')):
+                        key = (plat, f.name)
+                        if key not in seen:  # /usr/local entry wins over /usr/share
+                            seen.add(key)
+                            files.append({'name': f.name, 'path': str(f), 'target': plat})
+        wanted = f'{model}.json' if model else None
+        default = next((f['path'] for f in files if f['target'] == live and f['name'] == wanted), None)
+        if default is None:
+            default = next((f['path'] for f in files if f['name'] == wanted), None)
         if default is None and files:
             default = files[0]['path']
-        return jsonify({'target': target, 'model': model, 'default': default, 'files': files})
+        return jsonify({'target': live, 'model': model, 'default': default, 'files': files})
 
     # --- results -----------------------------------------------------------
     @app.route('/projects/<name>/results')

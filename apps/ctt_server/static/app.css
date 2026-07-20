@@ -424,7 +424,32 @@ td.mono { font-family: var(--mono); }
 .seg { display: inline-flex; background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--radius-sm); padding: 3px; gap: 3px; }
 .seg button { border: none; background: transparent; color: var(--text-dim); padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600; font-size: 0.85rem; }
 .seg button.active { background: var(--accent); color: #fff; }
+.seg button:disabled { opacity: 0.4; cursor: not-allowed; }
+.seg button.active:disabled { opacity: 0.55; }
 .seg.compact button { padding: 3px 9px; font-size: 0.78rem; }
+
+/* Platform pill (ISP target) used in the system-tuning selector. */
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.72rem;
+  font-weight: 700; letter-spacing: 0.02em; border: 1px solid var(--border-2); white-space: nowrap; }
+.pill-pisp { color: #a5d8ff; border-color: rgba(80, 160, 255, 0.45); background: rgba(80, 160, 255, 0.12); }
+.pill-vc4 { color: #ffd8a8; border-color: rgba(255, 160, 60, 0.45); background: rgba(255, 160, 60, 0.12); }
+
+/* Custom system-tuning dropdown: a native <select> can't show a styled pill per row. */
+.tselect { position: relative; }
+.tselect-btn { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; font: inherit;
+  background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--radius-sm);
+  color: var(--text); padding: 9px 12px; cursor: pointer; }
+.tselect-btn:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.tselect-val { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.tselect-val > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tselect-caret { margin-left: auto; color: var(--text-dim); font-size: 0.75rem; }
+.tselect-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 4px;
+  max-height: 300px; overflow-y: auto; list-style: none; background: var(--panel);
+  border: 1px solid var(--border-2); border-radius: var(--radius-sm); box-shadow: var(--shadow); }
+.tselect-opt { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+.tselect-opt > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tselect-opt:hover { background: var(--bg-2); }
+.tselect-opt.active { background: var(--accent-soft); }
 
 /* unachievable FPS target indicator (capture + preview info boxes) */
 .fps-warn {
