@@ -370,3 +370,50 @@ def test_import_tuning_route(tmp_path):
         content_type='multipart/form-data',
     )
     assert notarget.status_code == 400
+
+
+def _fake_system_roots(tmp_path, monkeypatch):
+    """Install fake pisp + vc4 system tunings and point the app's roots at them."""
+    from ctt_server import app as app_module
+
+    for plat, sensors in {'pisp': ['imx662', 'imx477'], 'vc4': ['imx662', 'imx219']}.items():
+        d = tmp_path / 'usr' / 'libcamera' / 'ipa' / 'rpi' / plat
+        d.mkdir(parents=True, exist_ok=True)
+        for s in sensors:
+            (d / f'{s}.json').write_text(json.dumps({'version': 2.0}))
+    monkeypatch.setattr(app_module, '_SYSTEM_TUNING_ROOTS', (str(tmp_path / 'usr'),))
+
+
+def test_system_tunings_lists_both_platforms(tmp_path, monkeypatch):
+    from ctt_server import app as app_module
+
+    sessions.Workspace(tmp_path).create_project('cam')
+    _fake_system_roots(tmp_path, monkeypatch)
+    monkeypatch.setattr(app_module, 'platform_target', lambda: 'pisp')
+
+    client = app_module.create_app(str(tmp_path)).test_client()
+    data = client.get('/projects/cam/run/system-tunings').get_json()
+
+    # Every entry is tagged with its platform, and both platforms are present.
+    by_target = {(f['name'], f['target']) for f in data['files']}
+    assert ('imx662.json', 'pisp') in by_target
+    assert ('imx662.json', 'vc4') in by_target
+    assert ('imx219.json', 'vc4') in by_target
+    assert {f['target'] for f in data['files']} == {'pisp', 'vc4'}
+
+
+def test_import_vc4_system_tuning_is_accepted(tmp_path, monkeypatch):
+    from ctt_server import app as app_module
+
+    proj = sessions.Workspace(tmp_path).create_project('cam')
+    _fake_system_roots(tmp_path, monkeypatch)
+    # The live ISP is PISP, but a VC4 system tuning must still import as vc4.
+    monkeypatch.setattr(app_module, 'platform_target', lambda: 'pisp')
+    vc4_file = tmp_path / 'usr' / 'libcamera' / 'ipa' / 'rpi' / 'vc4' / 'imx662.json'
+    vc4_file.write_text(json.dumps({'version': 2.0, 'target': 'bcm2835', 'algorithms': []}))
+
+    client = app_module.create_app(str(tmp_path)).test_client()
+    r = client.post('/projects/cam/run/import-tuning', data={'system_path': str(vc4_file)})
+    assert r.status_code == 200
+    assert r.get_json()['target'] == 'vc4'
+    assert (proj.output_dir / 'cam_vc4.json').exists()

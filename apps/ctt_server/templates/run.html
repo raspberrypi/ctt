@@ -12,10 +12,11 @@
     <div class="field">
       <label>Target platform</label>
       <div class="seg">
-        <button type="button" :class="{active: targets==='pisp,vc4'}" @click="targets='pisp,vc4'">Both</button>
-        <button type="button" :class="{active: targets==='pisp'}" @click="targets='pisp'">PiSP</button>
-        <button type="button" :class="{active: targets==='vc4'}" @click="targets='vc4'">VC4</button>
+        <button type="button" :class="{active: targets==='pisp,vc4'}" :disabled="targetLocked" @click="targets='pisp,vc4'">Both</button>
+        <button type="button" :class="{active: targets==='pisp'}" :disabled="targetLocked" @click="targets='pisp'">PiSP</button>
+        <button type="button" :class="{active: targets==='vc4'}" :disabled="targetLocked" @click="targets='vc4'">VC4</button>
       </div>
+      <div class="hint" x-show="targetLocked" x-cloak>Set by the selected existing tuning file — it is platform-specific.</div>
     </div>
 
     <div class="field">
@@ -36,18 +37,32 @@
         <label>Existing tuning</label>
         <div class="seg">
           <button type="button" :class="{active: updateSource==='project'}" @click="updateSource='project'">Project tuning</button>
-          <button type="button" :class="{active: updateSource==='system'}" @click="updateSource='system'; loadSystemTunings()">System tuning</button>
+          <button type="button" :class="{active: updateSource==='system'}" @click="updateSource='system'; loadSystemTunings(); syncSystemTarget()">System tuning</button>
           <button type="button" :class="{active: updateSource==='upload'}" @click="updateSource='upload'">Upload file</button>
         </div>
       </div>
       <div class="field" x-show="updateSource==='system'" x-cloak>
         <label>System tuning file</label>
-        <select x-model="systemTuning" x-show="systemTunings.length">
-          <template x-for="f in systemTunings" :key="f.path">
-            <option :value="f.path" x-text="f.name"></option>
-          </template>
-        </select>
-        <div class="hint" x-show="systemTunings.length">Using <span x-text="systemTuning"></span></div>
+        <div class="tselect" x-show="systemTunings.length" @click.away="stOpen=false" @keydown.escape="stOpen=false">
+          <button type="button" class="tselect-btn" @click="stOpen=!stOpen" :aria-expanded="stOpen">
+            <span class="tselect-val" x-show="selectedSystemFile">
+              <span x-text="selectedSystemFile && selectedSystemFile.name"></span>
+              <span class="pill" :class="'pill-' + (selectedSystemFile && selectedSystemFile.target)"
+                    x-text="selectedSystemFile && platformLabel(selectedSystemFile.target)"></span>
+            </span>
+            <span class="muted" x-show="!selectedSystemFile">Select a tuning file…</span>
+            <span class="tselect-caret" aria-hidden="true">▾</span>
+          </button>
+          <ul class="tselect-menu" x-show="stOpen" x-cloak x-transition.opacity.duration.120ms>
+            <template x-for="f in systemTunings" :key="f.path">
+              <li class="tselect-opt" :class="{active: f.path===systemTuning}"
+                  @click="systemTuning=f.path; syncSystemTarget(); stOpen=false">
+                <span x-text="f.name"></span>
+                <span class="pill" :class="'pill-' + f.target" x-text="platformLabel(f.target)"></span>
+              </li>
+            </template>
+          </ul>
+        </div>
         <div class="hint" x-show="!systemTunings.length" x-text="systemError || 'Looking for installed tuning files…'"></div>
       </div>
       <div class="field" x-show="updateSource==='upload'" x-cloak>

@@ -655,8 +655,9 @@ function runApp(cfg) {
     update: false,              // update an existing tuning in place (preserve non-recalibrated sections)
     updateSource: 'project',    // 'project' = the project's own tuning; 'system' = an installed libcamera tuning; 'upload' = a supplied file
     updateFile: null,           // selected file when updateSource === 'upload'
-    systemTunings: [],          // installed libcamera tuning files for this platform: [{name, path}]
+    systemTunings: [],          // installed libcamera tunings (both ISP platforms): [{name, path, target}]
     systemTuning: '',           // selected system tuning path when updateSource === 'system'
+    stOpen: false,              // system-tuning dropdown open state
     systemError: '',
     blSeed: null,               // black level measured from the project's dark frames
     blFrames: 0,
@@ -664,6 +665,22 @@ function runApp(cfg) {
     done: false,
     exitCode: null,
     source: null,
+
+    // A system/uploaded tuning is platform-specific, so the run target comes from
+    // the file, not this control. Lock the Target buttons while one is selected.
+    get targetLocked() {
+      return this.update && (this.updateSource === 'system' || this.updateSource === 'upload');
+    },
+
+    // The selected system-tuning file object (for the dropdown's current label + pill).
+    get selectedSystemFile() {
+      return this.systemTunings.find((f) => f.path === this.systemTuning) || null;
+    },
+
+    // Human label for an ISP target, matching the Target-platform buttons.
+    platformLabel(t) {
+      return t === 'pisp' ? 'PiSP' : t === 'vc4' ? 'VC4' : (t || '').toUpperCase();
+    },
 
     async init() {
       // Seed the black level field from the project's dark frames (if any).
@@ -691,7 +708,15 @@ function runApp(cfg) {
         this.systemTunings = d.files || [];
         this.systemTuning = d.default || (this.systemTunings[0] || {}).path || '';
         if (!this.systemTunings.length) this.systemError = 'No installed tuning files found.';
+        this.syncSystemTarget();
       } catch (e) { this.systemError = 'Failed to list system tunings'; }
+    },
+
+    // Point the run target at the selected system tuning's platform (it is
+    // platform-specific, so the update run must produce that target).
+    syncSystemTarget() {
+      const f = this.systemTunings.find((x) => x.path === this.systemTuning);
+      if (f && f.target) this.targets = f.target;
     },
 
     async start() {
