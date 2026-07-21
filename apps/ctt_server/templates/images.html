@@ -43,6 +43,10 @@
                   <span class="chip" :class="item.items[0].image_type" x-text="item.items[0].image_type"></span>
                   <span class="chip" x-text="item.items[0].colour_temp + 'K'"></span>
                   <template x-if="item.items[0].lux"><span class="chip" x-text="item.items[0].lux + ' lx'"></span></template>
+                  <template x-if="item.items[0].lightmeter">
+                    <span class="chip" title="Light-meter reading at capture"
+                          x-text="'measured ' + Math.round(item.items[0].lightmeter.illuminance_lux) + ' lx · ' + Math.round(item.items[0].lightmeter.cct) + ' K'"></span>
+                  </template>
                   <span class="chip jpeg">burst</span>
                 </div>
               </div>
@@ -79,6 +83,10 @@
                   <span class="chip" :class="item.c.image_type" x-text="item.c.image_type"></span>
                   <span class="chip" x-text="item.c.colour_temp + 'K'"></span>
                   <template x-if="item.c.lux"><span class="chip" x-text="item.c.lux + ' lx'"></span></template>
+                  <template x-if="item.c.lightmeter">
+                    <span class="chip" title="Light-meter reading at capture"
+                          x-text="'measured ' + Math.round(item.c.lightmeter.illuminance_lux) + ' lx · ' + Math.round(item.c.lightmeter.cct) + ' K'"></span>
+                  </template>
                   <template x-if="item.c.jpeg === 'saved'"><span class="chip jpeg">JPEG</span></template>
                   <template x-if="!item.c.valid"><span class="chip bad">invalid name</span></template>
                   <template x-if="item.c.excluded"><span class="chip warn">excluded</span></template>

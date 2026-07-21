@@ -170,6 +170,7 @@ input, select, textarea {
   border: 1px solid var(--border-2); border-radius: var(--radius-sm); outline: none;
 }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+input:disabled, select:disabled, textarea:disabled { opacity: 0.45; cursor: not-allowed; }
 .field { margin-bottom: 14px; }
 .field-row { display: flex; gap: 12px; }
 .field-row .field { flex: 1; }

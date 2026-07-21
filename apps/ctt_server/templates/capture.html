@@ -144,28 +144,32 @@
       <span class="chip" x-text="lightmeter.model + (lightmeter.serial ? ' · ' + lightmeter.serial : '')"></span>
     </div>
     <div class="field-row" style="align-items:flex-end; flex-wrap:wrap; gap:18px">
-      <div class="field" style="flex:0 0 auto; margin:0">
+      <div class="field" style="flex:1 0 auto; margin:0">
         <label>Illuminance</label>
         <div x-text="lightmeter.reading ? lightmeter.reading.illuminance_lux.toFixed(1) + ' lx' : '—'"></div>
       </div>
-      <div class="field" style="flex:0 0 auto; margin:0">
+      <div class="field" style="flex:1 0 auto; margin:0">
         <label>Colour temp.</label>
         <div x-text="lightmeter.reading ? lightmeter.reading.cct.toFixed(0) + ' K' : '—'"></div>
       </div>
-      <div class="field" style="flex:0 0 auto; margin:0">
+      <div class="field" style="flex:1 0 auto; margin:0">
         <label>Δuv</label>
         <div x-text="lightmeter.reading && lightmeter.reading.duv != null ? (lightmeter.reading.duv >= 0 ? '+' : '') + lightmeter.reading.duv.toFixed(4) : '—'"></div>
       </div>
-      <div class="field" style="flex:0 0 auto; margin:0">
+      <div class="field" style="flex:1 0 auto; margin:0">
         <label>CIE x, y</label>
         <div x-text="lightmeter.reading && lightmeter.reading.cie1931_xy ? lightmeter.reading.cie1931_xy[0].toFixed(4) + ', ' + lightmeter.reading.cie1931_xy[1].toFixed(4) : '—'"></div>
       </div>
-      <div class="field" style="flex:0 0 auto; margin:0">
+      <div class="field" style="flex:1 0 auto; margin:0">
         <label>Ra</label>
         <div x-text="lightmeter.reading && lightmeter.reading.cri_ra != null ? lightmeter.reading.cri_ra.toFixed(1) : '—'"></div>
       </div>
-      <div class="field" style="flex:0 0 auto; margin:0">
-        <button type="button" class="btn" @click="sampleLightmeter()" :disabled="lightmeter.busy" x-text="lightmeter.busy ? 'Sampling…' : 'Sample'"></button>
+      <div class="field" style="flex:0 0 auto; margin:0 0 0 auto; display:flex; align-items:center; gap:12px">
+        <button type="button" class="btn" @click="sampleLightmeter()" :disabled="lightmeter.busy">Sample</button>
+        <label style="display:inline-flex; align-items:center; gap:6px; margin:0">
+          <input type="checkbox" style="width:auto" x-model="lightmeter.auto"> Auto
+        </label>
+        <span class="hint" style="margin:0" x-show="lightmeter.updated" x-cloak x-text="'as of ' + lightmeter.updated"></span>
       </div>
     </div>
   </div>
@@ -174,7 +178,7 @@
   <div class="card mt">
     <div class="card-head"><h2>Tag &amp; capture</h2></div>
     <div class="field-row" style="align-items:flex-end; flex-wrap:wrap">
-      <div class="field" style="flex:0 0 auto; margin:0">
+      <div class="field" style="flex:1 0 auto; margin:0">
         <label>Image type</label>
         <div class="seg">
           <button type="button" :class="{active: form.image_type==='macbeth'}" @click="form.image_type='macbeth'">Macbeth</button>
@@ -183,15 +187,23 @@
           <button type="button" :class="{active: form.image_type==='dark'}" @click="form.image_type='dark'">Dark</button>
         </div>
       </div>
-      <div class="field" x-show="form.image_type!=='dark'" style="flex:0 0 150px; margin:0">
+      <div class="field" x-show="form.image_type!=='dark'" style="flex:1 0 150px; margin:0">
         <label>Colour temp (K)</label>
-        <input type="number" x-model.number="form.colour_temp" min="1000" max="12000" step="50">
+        <input type="number" x-model.number="form.colour_temp" min="1000" max="12000" step="50"
+               :disabled="autoTag && lightmeter.present">
       </div>
-      <div class="field" x-show="form.image_type==='macbeth'" style="flex:0 0 130px; margin:0">
+      <div class="field" x-show="form.image_type==='macbeth'" style="flex:1 0 130px; margin:0">
         <label>Lux</label>
-        <input type="number" x-model.number="form.lux" min="1" step="1">
+        <input type="number" x-model.number="form.lux" min="1" step="1"
+               :disabled="autoTag && lightmeter.present">
       </div>
-      <div class="field" style="flex:0 0 100px; margin:0">
+      <div class="field" style="flex:1 0 auto; margin:0" x-show="lightmeter.present && form.image_type!=='dark'" x-cloak>
+        <label style="display:inline-flex; align-items:center; gap:6px"
+               title="Fill the colour temp and lux tags from the light meter's latest reading">
+          <input type="checkbox" style="width:auto" x-model="autoTag" @change="autoTag && tagFromMeter()"> Auto-tag
+        </label>
+      </div>
+      <div class="field" style="flex:1 0 100px; margin:0">
         <label title="Frames captured per shot, saved as indexed files; CTT averages each burst internally">Burst</label>
         <input type="number" x-model.number="form.frames" min="1" max="16" step="1">
       </div>

@@ -12,6 +12,7 @@ import difflib
 import json
 import logging
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -98,6 +99,7 @@ def _serialise_captures(project: Project) -> list[dict]:
                 'valid': valid,
                 'jpeg': jpeg,
                 'excluded': c.excluded,
+                'lightmeter': c.lightmeter,
             }
         )
     return out
@@ -223,6 +225,21 @@ def create_app(workspace_root: str | None = None) -> Flask:
             return {'present': True, **meter.info()}
         except LightmeterError:  # device went away mid-session
             return {'present': False}
+
+    def lightmeter_reading_or_none() -> dict | None:
+        """A fresh reading for tagging a capture, or None. Never raises: a capture
+        must succeed unchanged when no meter is present or the reading fails."""
+        meter = lightmeter_or_none()
+        if meter is None:
+            return None
+        try:
+            reading = meter.measure().to_dict()
+        except LightmeterError as err:
+            logger.warning('capture: light-meter reading failed: %s', err)
+            return None
+        # Keep the project sidecar compact: the 5 nm spectrum is plenty.
+        reading.pop('spectrum_1nm', None)
+        return reading
 
     # --- pages -------------------------------------------------------------
     @app.route('/')
@@ -496,7 +513,16 @@ def create_app(workspace_root: str | None = None) -> Flask:
             lux = int(body['lux']) if body.get('lux') not in (None, '') else None
             label = body.get('label') or None
             frames = max(1, min(int(body.get('frames', 1) or 1), 16))
-            shots = get_shared_camera().capture_burst(frames)
+            # Read the light meter (if one is present) alongside the burst — both are
+            # slow I/O on independent devices, so overlap them. One reading tags the
+            # whole burst: the frames share a scene and illuminant.
+            reading_box: dict = {}
+            reader = threading.Thread(target=lambda: reading_box.update(reading=lightmeter_reading_or_none()))
+            reader.start()
+            try:
+                shots = get_shared_camera().capture_burst(frames)
+            finally:
+                reader.join()
             caps = [
                 proj.add_capture(
                     dng_bytes,
@@ -507,6 +533,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
                     controls=meta,
                     jpeg_bytes=jpg_bytes,
                     indexed=frames > 1,  # burst frames get _<n> names; singles keep overwrite semantics
+                    lightmeter=reading_box.get('reading'),
                 )
                 for dng_bytes, jpg_bytes, meta in shots
             ]
@@ -523,6 +550,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
                 'label': cap.label,
                 'valid': True,
                 'jpeg': 'saved',  # a fresh capture always has a full-res JPEG
+                'lightmeter': cap.lightmeter,
             }
             for cap in caps
         ]
