@@ -665,6 +665,7 @@ function runApp(cfg) {
     done: false,
     exitCode: null,
     source: null,
+    started: false,        // a run has been started this page-load (hides the plan preview)
 
     // A system/uploaded tuning is platform-specific, so the run target comes from
     // the file, not this control. Lock the Target buttons while one is selected.
@@ -680,6 +681,11 @@ function runApp(cfg) {
     // Human label for an ISP target, matching the Target-platform buttons.
     platformLabel(t) {
       return t === 'pisp' ? 'PiSP' : t === 'vc4' ? 'VC4' : (t || '').toUpperCase();
+    },
+
+    // The invocation the run will echo, shown in the empty console as a preview.
+    get planLine() {
+      return `$ ctt  targets=${this.targets}  mode=${this.mode}  update=${this.update ? 'on' : 'off'}`;
     },
 
     async init() {
@@ -722,6 +728,7 @@ function runApp(cfg) {
     async start() {
       if (this.running) return;
       this.running = true; this.done = false; this.exitCode = null;
+      this.started = true;
       const console = this.$refs.console;
       console.innerHTML = '';
       // An uploaded or installed (system) tuning becomes the project's tuning for
@@ -793,7 +800,9 @@ function runApp(cfg) {
       el.className = 'ln ' + classify(line);
       el.textContent = line;
       consoleEl.appendChild(el);
-      consoleEl.scrollTop = consoleEl.scrollHeight;
+      // The log div nests inside the scrolling .console box; scroll the box.
+      const box = consoleEl.closest('.console') || consoleEl;
+      box.scrollTop = box.scrollHeight;
     },
   };
 }
