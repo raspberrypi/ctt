@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}Characterise · {{ project.name }}{% endblock %}
+{% block body %}
+{% set active_tab = 'characterisation' %}
+{% include '_project_tabs.html' %}
+
+<!-- Sensor characterisation: offline analysis of existing captures plus live
+     exposure sweeps. The datasheet strip below the actions is the product;
+     everything under it is the evidence. -->
+<div class="grid" x-data='characterisationApp({ project: {{ project.name|tojson }} })' x-init="init()">
+
+  <div class="card">
+    <div class="card-head">
+      <h2>Sensor characterisation</h2>
+      <div class="btn-row" style="align-items:center">
+        <span class="chip" x-show="exitCode !== null" :class="exitCode === 0 ? 'cac' : ''"
+              x-text="exitCode === 0 ? 'done' : 'exit ' + exitCode" x-cloak></span>
+        <button class="btn" :disabled="running || !groups.length" @click="analyse()">
+          <span x-text="running ? 'Working…' : 'Analyse captures'"></span>
+        </button>
+      </div>
+    </div>
+    <div class="banner error" x-show="error" x-text="error" x-cloak></div>
+    <div class="banner info" x-show="stale" x-cloak>
+      Captures have changed since the last analysis — re-run Analyse captures.
+    </div>
+    <p class="hint" style="margin-top:0">Measures the sensor itself from raw captures. Dark bursts (lens cap on)
+      provide the black level, read noise and DSNU; ALSC flat-field bursts provide PRNU and photon-transfer
+      points; a live exposure sweep against a static, evenly lit target adds the conversion gain, linearity,
+      full well and dynamic range. Statistics use the central ROI of a single green channel.</p>
+    <div class="field-row" style="align-items:flex-start; max-width:780px">
+      <div class="field" style="margin-bottom:0">
+        <label>Sweep gains</label>
+        <input type="text" x-model="sweepGains" placeholder="1  or  1,2,4,8">
+        <div class="hint">Analogue gains to characterise. Several (e.g. 1,2,4,8) add the gain-sweep test.</div>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label>Points</label>
+        <input type="number" x-model.number="sweepPoints" min="4" max="16" step="1">
+        <div class="hint">Exposure steps per gain, from near-dark to saturation.</div>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label>Frames</label>
+        <input type="number" x-model.number="sweepFrames" min="2" max="16" step="1">
+        <div class="hint">Burst size per step; more frames, cleaner noise estimates.</div>
+      </div>
+      <div class="field" style="margin-bottom:0; flex:0 0 auto">
+        <label>&nbsp;</label>
+        <button class="btn primary" :disabled="running" @click="sweep()">
+          <span x-text="running ? 'Sweeping…' : '▶ Run sweep'"></span>
+        </button>
+      </div>
+    </div>
+    <div class="console" style="height: 180px; margin-top: 14px" x-show="running || consoleUsed" x-cloak>
+      <div x-ref="console"></div>
+    </div>
+  </div>
+
+  <!-- The datasheet: every headline measurement in one row; dimmed = not yet measurable -->
+  <div class="stats compact datasheet" x-show="results" x-cloak>
+    <template x-for="t in sheet" :key="t.label">
+      <div class="stat" :class="{ pending: t.value === null }" :data-tip="t.tip" tabindex="0">
+        <div class="n"><span x-text="t.value !== null ? t.value : '—'"></span><span class="u" x-show="t.value !== null && t.unit" x-text="t.unit"></span></div>
+        <div class="l" x-text="t.label"></div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Photon transfer: the evidence behind K / read noise / full well -->
+  <div class="card" x-show="ptc.points.length" x-cloak>
+    <div class="card-head">
+      <h2>Photon transfer</h2>
+      <button class="btn sm ghost" @click="showPoints = !showPoints"
+              x-text="showPoints ? 'Hide points' : 'Show points'"></button>
+    </div>
+    <div class="banner info" x-show="results && ptc.unavailable_reason" x-cloak>
+      <span x-text="ptc.unavailable_reason"></span>
+    </div>
+    <div class="grid" :class="{ 'cols-2': snrCurve.length }">
+      <div class="chart-box"><canvas id="ptcChart"></canvas></div>
+      <div class="chart-box" x-show="snrCurve.length" x-cloak><canvas id="snrChart"></canvas></div>
+    </div>
+    <div class="hint">Temporal variance vs mean signal per burst (log–log); the straight-line slope of a
+      well-spread single-gain sweep gives the conversion gain, its intercept the read noise. Hollow points
+      are excluded: clipped, or sampled from a chart rather than a flat field.</div>
+    <table x-show="showPoints" x-cloak style="margin-top:10px">
+      <thead><tr><th>Point</th><th>Mean (DN₁₆)</th><th>Variance</th><th>Gain</th><th></th></tr></thead>
+      <tbody>
+        <template x-for="p in ptc.points" :key="p.label + p.exposure_us">
+          <tr>
+            <td class="mono" x-text="p.label"></td>
+            <td class="mono" x-text="p.mean_dn.toFixed(0)"></td>
+            <td class="mono" x-text="p.var_dn2.toFixed(1)"></td>
+            <td class="mono" x-text="p.gain.toFixed(2)"></td>
+            <td><span class="chip" x-show="p.clipped || p.source === 'chart'" x-cloak
+                      x-text="p.clipped ? 'clipped' : 'chart'"></span></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+    <table x-show="gainSweep.available" x-cloak style="margin-top:10px">
+      <thead><tr><th>Gain</th><th>K (e⁻/DN₁₆)</th><th>Read noise (DN₁₆)</th><th>Read noise (e⁻)</th></tr></thead>
+      <tbody>
+        <template x-for="g in gainSweep.gains" :key="g.gain">
+          <tr>
+            <td class="mono" x-text="g.gain"></td>
+            <td class="mono" x-text="g.k_e_per_dn != null ? g.k_e_per_dn : '—'"></td>
+            <td class="mono" x-text="g.read_noise_dn != null ? g.read_noise_dn : '—'"></td>
+            <td class="mono" x-text="g.read_noise_e != null ? g.read_noise_e : '—'"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid cols-2">
+    <!-- Inventory: what exists and what it serves -->
+    <div class="card">
+      <div class="card-head"><h2>Captures</h2></div>
+      <div class="empty" x-show="!groups.length" x-cloak>
+        <div class="big">📷</div>No usable captures — dark, ALSC or Macbeth bursts feed characterisation.
+      </div>
+      <table x-show="groups.length" x-cloak>
+        <thead><tr><th>Group</th><th>Kind</th><th>Frames</th><th>Exposure</th><th>Gain</th></tr></thead>
+        <tbody>
+          <template x-for="g in groups" :key="g.label">
+            <tr>
+              <td class="mono" x-text="g.label"></td>
+              <td><span class="chip" :class="{macbeth: g.kind === 'chart', alsc: g.kind === 'flat'}"
+                        x-text="g.kind"></span></td>
+              <td x-text="g.frames"></td>
+              <td class="mono" x-text="fmtExposure(g.exposure_us)"></td>
+              <td class="mono" x-text="g.gain.toFixed(2)"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <div class="hint" x-show="warnings.length" x-cloak>
+        <template x-for="w in warnings"><div x-text="'⚠ ' + (w.group ? w.group + ': ' : '') + w.message"></div></template>
+      </div>
+    </div>
+
+    <div class="grid" style="align-content:start">
+      <!-- Dark detail: the per-channel pedestal behind the datasheet number -->
+      <div class="card">
+        <div class="card-head"><h2>Dark &amp; black level</h2></div>
+        <div class="banner info" x-show="results && !dark.available" x-cloak>
+          No dark frames — capture a dark burst (lens cap on) on the Capture tab.
+        </div>
+        <div x-show="dark.available" x-cloak>
+          <div class="stats compact">
+            <template x-for="c in darkChannels" :key="c.label">
+              <div class="stat"><div class="n" x-text="c.value"></div><div class="l" x-text="c.label"></div></div>
+            </template>
+          </div>
+          <div class="hint">
+            <span x-text="dark.n_frames + ' frames · ' + fmtExposure(dark.exposure_us) + ' · gain ' + dark.gain
+                          + ' · read noise ' + fmtDn(dark.read_noise_dn) + ' DN₁₆ · DSNU ' + fmtDn(dark.dsnu_dn) + ' DN₁₆'"></span>
+            <span x-show="dark.read_noise_e === null"> — electron values appear once a sweep provides the conversion gain.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- PRNU detail -->
+      <div class="card">
+        <div class="card-head"><h2>PRNU</h2></div>
+        <div class="banner info" x-show="results && !prnu.available" x-cloak>
+          <span x-text="(prnu.unavailable_reason || 'No flat-field bursts analysed yet.')"></span>
+        </div>
+        <div class="stats compact" x-show="prnu.available" x-cloak style="flex-wrap:wrap">
+          <template x-for="g in prnu.groups" :key="g.label">
+            <div class="stat">
+              <div class="n" x-text="g.prnu_pct.toFixed(2) + '%'"></div>
+              <div class="l" x-text="g.label + ' · mean ' + g.mean_dn.toFixed(0) + ' DN₁₆'"></div>
+            </div>
+          </template>
+        </div>
+        <div class="hint" x-show="prnu.available" x-cloak>Residual non-uniformity of the time-averaged
+          flat field after removing the lens-shading gradient.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/alpine.min.js') }}" defer></script>
+{% endblock %}

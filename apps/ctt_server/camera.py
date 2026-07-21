@@ -422,6 +422,114 @@ class Picamera2Camera:
         pitch_y = chart_h / 2 / 4  # half-res pitch across 4 patch rows
         return min(pitch_x, pitch_y) < self._MIN_PITCH
 
+    # --- raw burst capture (sensor characterisation) ------------------------
+    # Bayer offsets of the Gr sample (the green sharing a row with red) within
+    # the 2x2 tile, keyed by the CFA order encoded in the raw format string.
+    _GR_OFFSET = {'RGGB': (0, 1), 'GRBG': (0, 0), 'BGGR': (1, 0), 'GBRG': (1, 1)}
+
+    def _configured_raw_format(self) -> str:
+        """The raw stream format actually configured (may differ from the request).
+
+        Requesting the mode's unpacked format (e.g. 'SRGGB12') can be satisfied
+        with a deeper container (e.g. 'SRGGB16', samples already left-justified
+        to 16 bits) — the delivered format decides the sample scaling.
+        """
+        try:
+            return str(self._picam2.camera_configuration()['raw']['format'])
+        except Exception:  # pragma: no cover - defensive: fall back to the request
+            return self._raw_format or ''
+
+    def _gr_offset(self, fmt: str) -> tuple[int, int]:
+        for pattern, offset in self._GR_OFFSET.items():
+            if pattern in fmt:
+                return offset
+        return (0, 0)  # mono (or unknown): a single plane, any offset works
+
+    def _raw_frame(self, request):
+        """The request's raw plane as a full-resolution uint16 array.
+
+        The raw stream is configured unpacked (one sample per 16-bit word), but
+        make_array can hand it back as bytes with row-stride padding; view as
+        uint16 and crop to the active area.
+        """
+        import numpy as np  # noqa: PLC0415
+
+        arr = request.make_array('raw')
+        if arr.dtype == np.uint8:
+            arr = arr.view(np.uint16)
+        w, h = self._raw_size
+        return arr[:h, :w]
+
+    def capture_raw_burst(self, frames: int, exposure_us: int, gain: float, roi_fraction: float = 0.5) -> dict:
+        """A burst of Gr-channel ROI crops at one manual operating point (DN16).
+
+        The caller must already have auto-exposure/AWB off and the frame
+        duration unconstrained (set_controls). Sets the requested exposure and
+        gain, discards frames until the metadata readback matches the request
+        (controls take a few frames to land — trust readbacks, not requests),
+        then grabs the burst from the running video config: no mode switch, no
+        DNG on disk, memory bounded by ROI x frames. Samples are left-shifted
+        to the 16-bit domain of ctt.characterisation.
+
+        Returns {'frames', 'exposure_us', 'gain', 'blacklevel_16', 'sigbits'}
+        with the *readback* exposure/gain and the pipeline's reported black
+        level (libcamera quotes SensorBlackLevels in the 16-bit domain).
+        """
+        import numpy as np  # noqa: PLC0415
+
+        frames = max(1, min(int(frames), 32))
+        with self._lock:
+            self._picam2.set_controls({'ExposureTime': int(exposure_us), 'AnalogueGain': float(gain)})
+            metadata = None
+            for _ in range(12):  # settle: controls typically land within 1-3 frames
+                request = self._picam2.capture_request()
+                metadata = request.get_metadata()
+                request.release()
+                applied_exp = int(metadata.get('ExposureTime', 0))
+                applied_gain = float(metadata.get('AnalogueGain', 0.0))
+                exp_ok = abs(applied_exp - exposure_us) <= max(0.02 * exposure_us, 25)
+                gain_ok = abs(applied_gain - gain) <= 0.02 * gain
+                if exp_ok and gain_ok:
+                    break
+            else:
+                raise CameraError(
+                    f'controls did not settle: requested {exposure_us} us / gain {gain:.2f}, '
+                    f'applied {applied_exp} us / {applied_gain:.2f} '
+                    '(exposure may exceed the frame duration or the sensor limits)'
+                )
+
+            # Sample scaling follows the *delivered* stream format: 'SRGGB16'
+            # samples are already left-justified 16-bit, 'SRGGB12' needs << 4.
+            fmt = self._configured_raw_format()
+            digits = ''.join(c for c in fmt if c.isdigit())
+            stream_bits = int(digits) if digits else 16
+            shift = max(0, 16 - stream_bits)
+            dy, dx = self._gr_offset(fmt)
+            crops = []
+            for _ in range(frames):
+                request = self._picam2.capture_request()
+                try:
+                    plane = self._raw_frame(request)[dy::2, dx::2]
+                    if crops == []:
+                        from ctt.characterisation import centre_roi  # noqa: PLC0415
+
+                        roi = centre_roi(plane.shape, roi_fraction)
+                    crops.append(np.left_shift(plane[roi].astype(np.uint16), shift))
+                    metadata = request.get_metadata()
+                finally:
+                    request.release()
+            # SensorBlackLevels: per-channel, 16-bit domain; fall back to 4096
+            # (a 12-bit pedestal of 256) only if the pipeline omits it.
+            blacks = metadata.get('SensorBlackLevels')
+            blacklevel_16 = float(blacks[0]) if blacks else 4096.0
+        return {
+            'frames': crops,
+            'exposure_us': int(metadata.get('ExposureTime', exposure_us)),
+            'gain': float(metadata.get('AnalogueGain', gain)),
+            'blacklevel_16': blacklevel_16,
+            'sigbits': stream_bits,
+        }
+
     # --- DNG capture -------------------------------------------------------
     def capture_dng(self) -> tuple[bytes, dict]:
         with self._lock:
