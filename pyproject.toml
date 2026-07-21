@@ -33,8 +33,9 @@ test = ["pytest>=8.0"]
 # Runs on the Raspberry Pi; picamera2 is a system package (ships with Pi OS), imported
 # lazily, so it is intentionally not a pip dependency here.
 server = ["flask>=3.0"]
-# Optional: control a USB lightbox (e.g. Image Engineering lightSTUDIO-S) from the
-# Pi. pyusb is lazy-imported so core CTT is unaffected; also needs a libusb backend
+# Optional: control a USB lightbox (e.g. Image Engineering lightSTUDIO-S) and read a
+# USB light meter (e.g. Konica Minolta CL-70F) from the Pi. pyusb is lazy-imported so
+# core CTT is unaffected; it also needs a libusb backend
 # (sudo apt install libusb-1.0-0). See the top-level devices/ package.
 devices = ["pyusb>=1.2"]
 # Developer tooling: lint/format hooks run via pre-commit (config in .pre-commit-config.yaml).
@@ -47,6 +48,8 @@ ctt = "ctt_cli.cli:main"
 ctt-server = "ctt_server.__main__:main"
 # Lightbox control CLI. See the top-level devices/ package.
 ctt-lightbox = "devices.lightbox_cli:main"
+# Light-meter read CLI. See the top-level devices/ package.
+ctt-lightmeter = "devices.lightmeter_cli:main"
 
 [tool.setuptools.packages.find]
 # Discover the top-level ctt / devices packages at the repo root, and the
@@ -57,6 +60,7 @@ include = ["ctt*", "devices*", "ctt_cli*", "ctt_server*"]
 [tool.setuptools.package-data]
 "ctt.data" = ["*.pgm", "*.json"]
 "devices.lightstudio_s" = ["contrib/*.rules"]
+"devices.cl70f" = ["contrib/*.rules"]
 "ctt_server" = ["templates/*.html", "static/*", "static/**/*"]
 
 [tool.pytest.ini_options]

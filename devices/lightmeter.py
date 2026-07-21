@@ -76,6 +76,10 @@ class LightmeterError(RuntimeError):
     """Raised when a light meter is unavailable or a command fails."""
 
 
+class LightmeterTimeout(LightmeterError):
+    """Raised when the meter sends no reply within the allowed time."""
+
+
 class LightMeter(ABC):
     """A light-measurement device that reports illuminance and colour.
 

@@ -6,10 +6,20 @@
 
 from .lightbox import Lightbox, LightboxError, LightboxState
 from .lightmeter import LightMeter, LightmeterError, Measurement, Spectrum
-from .registry import LIGHTBOX_DRIVERS, get_lightbox, get_shared_lightbox, register_lightbox_driver
+from .registry import (
+    LIGHTBOX_DRIVERS,
+    LIGHTMETER_DRIVERS,
+    get_lightbox,
+    get_lightmeter,
+    get_shared_lightbox,
+    get_shared_lightmeter,
+    register_lightbox_driver,
+    register_lightmeter_driver,
+)
 
 __all__ = [
     'LIGHTBOX_DRIVERS',
+    'LIGHTMETER_DRIVERS',
     'Lightbox',
     'LightboxError',
     'LightboxState',
@@ -18,6 +28,9 @@ __all__ = [
     'Measurement',
     'Spectrum',
     'get_lightbox',
+    'get_lightmeter',
     'get_shared_lightbox',
+    'get_shared_lightmeter',
     'register_lightbox_driver',
+    'register_lightmeter_driver',
 ]

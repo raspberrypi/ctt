@@ -1,0 +1,9 @@
+# Konica Minolta CL-70F — allow non-root USB access via libusb/pyusb.
+#
+# Install:
+#   sudo cp 99-cl70f.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload && sudo udevadm trigger
+#
+# TAG+=uaccess grants the logged-in user access; GROUP=plugdev MODE=0660 covers
+# headless/service use.
+SUBSYSTEM=="usb", ATTR{idVendor}=="0a41", ATTR{idProduct}=="7003", MODE="0660", GROUP="plugdev", TAG+="uaccess"

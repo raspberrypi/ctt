@@ -1,12 +1,13 @@
 # Device control
 
-The top-level `devices` package provides a small, generic API for controlling an illumination lightbox
-over USB from the Pi, so a calibration run can set repeatable illuminants
-programmatically. Consumers use the abstract `Lightbox` interface and the
-device-agnostic factory; concrete drivers (currently **Image Engineering
-lightSTUDIO-S**) plug in behind it. A new lightbox is added as a driver package under
-`devices/<model>/` registered in `devices/registry.py` — no
-change to the generic API or its consumers.
+The top-level `devices` package provides small, generic APIs for two kinds of USB
+device on the Pi: a controllable illumination **lightbox** (so a calibration run can
+set repeatable illuminants programmatically) and a **light meter** (so it can read back
+illuminance and colour temperature). Consumers use the abstract interfaces and the
+device-agnostic factories; concrete drivers plug in behind them — currently **Image
+Engineering lightSTUDIO-S** (lightbox) and **Konica Minolta CL-70F** (light meter). A
+new device is added as a driver package under `devices/<model>/` registered in
+`devices/registry.py` — no change to the generic API or its consumers.
 
 ## Install (on the Pi)
 
@@ -75,3 +76,33 @@ ctt-lightbox off
 | 6  | `Halogen100` | Halogen (100 lux)               | 25  |
 | 7  | `Halogen400` | Halogen (400 lux)               | 100 |
 | 8  | `HalogenBF`  | Halogen + blue filter (400 lux) | 100 |
+
+## Light meter
+
+A light meter measures rather than controls: each `measure()` returns a `Measurement`
+with illuminance (lux) and correlated colour temperature always present, plus optional
+colorimetry (Δuv, CIE 1931 x/y, CIE 1976 u′v′, CIE 1960 uv), foot-candles, tristimulus
+XYZ, dominant wavelength, excitation purity, CRI (Ra and R1–R15) and the 380–780 nm
+spectrum where the device supplies them. `read_latest()` returns the device's last
+reading without triggering a new one.
+
+```python
+from devices import get_lightmeter
+
+with get_lightmeter() as meter:            # first attached, supported meter
+    reading = meter.measure()               # trigger and read one measurement
+    print(reading.illuminance_lux, reading.cct)
+    print(reading.to_dict())                # JSON-friendly, omitting unset fields
+    meter.read_latest()                     # last stored reading, or None
+```
+
+```bash
+ctt-lightmeter probe                        # find the meter, show identity
+ctt-lightmeter measure                      # one reading (--json for the full dump)
+ctt-lightmeter sample --interval 5          # a reading every 5 s until interrupted
+ctt-lightmeter sample --interval 5 --count 10
+ctt-lightmeter calibrate                    # run a dark calibration
+```
+
+Non-root USB access to the CL-70F needs the udev rule from
+`devices/cl70f/contrib/99-cl70f.rules` (install instructions in the file).
