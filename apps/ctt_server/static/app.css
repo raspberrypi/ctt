@@ -493,3 +493,26 @@ td.mono { font-family: var(--mono); }
 /* Inset for a conditional sub-flow (e.g. the update-tuning source picker):
  * a left rule contains the controls that only exist because of the toggle above. */
 .subflow { margin: -4px 0 14px 5px; padding: 2px 0 2px 16px; border-left: 2px solid var(--border-2); }
+
+/* --- Characterise page --------------------------------------------------- */
+/* The datasheet strip: one tile per headline sensor measurement. */
+.stats.datasheet { flex-wrap: wrap; }
+.stats.datasheet .stat { min-width: 128px; position: relative; cursor: help; }
+.stats.datasheet .stat .u { font-size: 0.72rem; font-weight: 600; color: var(--text-dim); margin-left: 4px; }
+.stats.datasheet .stat.pending { opacity: 0.45; }
+/* Hover/focus tooltip explaining each measurement (content in data-tip). A
+ * pending tile is dimmed, but its tooltip must not be: opacity resets to 1. */
+.stats.datasheet .stat[data-tip]:hover::after,
+.stats.datasheet .stat[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; width: 300px;
+  padding: 9px 11px; background: var(--panel-2); border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow);
+  color: var(--text-dim); font-size: 0.76rem; font-weight: 400; line-height: 1.5;
+  white-space: normal; text-transform: none; letter-spacing: normal;
+}
+.stats.datasheet .stat.pending:hover, .stats.datasheet .stat.pending:focus-visible { opacity: 1; }
+.stats.datasheet .stat:focus-visible { outline: none; border-color: var(--accent); }
+/* Right-most tiles: anchor the tooltip to the right edge so it stays on-screen. */
+.stats.datasheet .stat:nth-last-child(-n+2)[data-tip]:hover::after,
+.stats.datasheet .stat:nth-last-child(-n+2)[data-tip]:focus-visible::after { left: auto; right: 0; }

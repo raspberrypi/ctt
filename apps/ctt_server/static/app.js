@@ -2301,3 +2301,241 @@ function chartOpts(xTitle, yTitle) {
     },
   };
 }
+
+// --- characterisation page ---------------------------------------------------
+function characterisationApp(cfg) {
+  return {
+    project: cfg.project,
+    groups: [],           // quick-scan inventory (renders before any analysis)
+    results: null,        // persisted results.json contents (or null)
+    stale: false,         // captures changed since the results were generated
+    running: false,
+    consoleUsed: false,
+    exitCode: null,
+    error: '',
+    source: null,
+    ptcChart: null,
+    snrChart: null,
+    showPoints: false,    // PTC per-point table, collapsed by default
+    sweepGains: '1',      // live-sweep parameters
+    sweepPoints: 10,
+    sweepFrames: 8,
+
+    // Sections with safe defaults so the template renders before data arrives.
+    get dark() { return (this.results && this.results.dark) || { available: false }; },
+    get ptc() { return (this.results && this.results.ptc) || { points: [], fits: [], unavailable_reason: null }; },
+    get prnu() { return (this.results && this.results.prnu) || { available: false, groups: [] }; },
+    get reliableFit() { return this.ptc.fits.find((f) => f.reliable) || null; },
+    get fullWell() { return (this.results && this.results.full_well) || { available: false }; },
+    get dynamicRange() { return (this.results && this.results.dynamic_range) || { available: false }; },
+    get gainSweep() { return (this.results && this.results.gain_sweep) || { available: false, gains: [] }; },
+    get snrCurve() { return (this.results && this.results.snr_curve) || []; },
+    get linearityR2() {
+      const lin = this.results && this.results.linearity;
+      return lin && lin.available ? lin.r2.toFixed(4) : '—';
+    },
+
+    // The datasheet strip: every headline measurement, null value = not yet
+    // measurable (the tile renders dimmed with an em dash). Each tile carries
+    // a tooltip: what the number means, how it was measured, and — when
+    // pending — what would make it measurable.
+    get sheet() {
+      const dark = this.dark, fit = this.reliableFit;
+      const needSweep = 'Run a live sweep against a flat, evenly lit, static target to measure this.';
+      const rn = dark.available
+        ? (dark.read_noise_e != null
+            ? { value: dark.read_noise_e, unit: 'e⁻' }
+            : { value: dark.read_noise_dn, unit: 'DN₁₆', note: 'Shown in electrons once a sweep provides the conversion gain.' })
+        : { value: null, note: 'Needs a dark burst (lens cap on).' };
+      const dsnu = dark.available
+        ? (dark.dsnu_e != null ? { value: dark.dsnu_e, unit: 'e⁻' } : { value: dark.dsnu_dn, unit: 'DN₁₆' })
+        : { value: null, note: 'Needs a dark burst (lens cap on).' };
+      const lin = this.results && this.results.linearity;
+      const tiles = [
+        { label: 'Black level', unit: 'DN₁₆',
+          value: dark.available ? Math.round(dark.pedestal.black_level_16) : null,
+          note: dark.available ? null : 'Needs a dark burst (lens cap on).',
+          tip: 'The zero-light pedestal: the mean level of the dark burst. Every other measurement is taken above this. Should sit close to the metadata black level — a higher reading suggests a light leak.' },
+        { label: 'Read noise', ...rn,
+          tip: 'The noise floor with no light: per-pixel temporal standard deviation across the dark burst. Sets the shadow noise and the bottom of the dynamic range.' },
+        { label: 'DSNU', ...dsnu,
+          tip: 'Dark-signal non-uniformity: the fixed pattern left in the time-averaged dark frame after removing low-order shading — offset variation between pixels.' },
+        { label: 'PRNU', unit: '%', value: this.prnu.available ? this.prnu.best_pct : null,
+          note: this.prnu.available ? null : 'Needs an unclipped multi-frame flat-field burst.',
+          tip: 'Photo-response non-uniformity: pixel-to-pixel sensitivity variation, from the residual spatial variation of a time-averaged flat field after removing the lens-shading gradient (best flat-field group shown).' },
+        { label: 'Conversion gain', unit: 'e⁻/DN₁₆',
+          value: fit ? fit.k_e_per_dn.toFixed(3) : null, note: fit ? null : needSweep,
+          tip: 'Electrons per digital number: 1/slope of the photon-transfer curve (temporal variance vs mean signal). The bridge between DN and physical electrons — every e⁻ figure here derives from it.' },
+        { label: 'Full well', unit: this.fullWell.full_well_e != null ? 'e⁻' : 'DN₁₆',
+          value: this.fullWell.available
+            ? Math.round(this.fullWell.full_well_e != null ? this.fullWell.full_well_e : this.fullWell.full_well_dn)
+            : null,
+          note: this.fullWell.available ? null : needSweep,
+          tip: 'Saturation capacity: the signal level where the response clips, from the highest clipped sweep point. Quoted in electrons when the conversion gain is known.' },
+        { label: 'Dynamic range', unit: 'dB',
+          value: this.dynamicRange.available ? this.dynamicRange.db : null,
+          note: this.dynamicRange.available ? null : needSweep,
+          tip: '20·log₁₀(full well ÷ read noise), both in electrons: the usable range between saturation and the noise floor.' },
+        { label: 'Linearity R²', unit: '',
+          value: lin && lin.available ? lin.r2.toFixed(4) : null,
+          note: lin && lin.available ? null : needSweep,
+          tip: 'Goodness of the straight-line fit of mean signal vs exposure time across the sweep (at least three unclipped points). 1.000 means the response is proportional to exposure.' },
+      ];
+      for (const t of tiles) {
+        if (t.note) t.tip += ' ' + t.note;  // pending or unit-fallback explanation
+      }
+      return tiles;
+    },
+
+    // Per-channel dark pedestal for the detail card (means over the burst).
+    get darkChannels() {
+      const frames = (this.dark.available && this.dark.pedestal.frames) || [];
+      if (!frames.length) {
+        return this.dark.available
+          ? [{ label: 'Black level (DN₁₆)', value: this.fmtDn(this.dark.pedestal.black_level_16) }]
+          : [];
+      }
+      const mean = (k) => {
+        const vals = frames.map((f) => f[k]).filter((v) => v != null);
+        return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : null;
+      };
+      if (frames[0].y != null) return [{ label: 'Y (DN₁₆)', value: mean('y') }];
+      return [
+        { label: 'R (DN₁₆)', value: mean('r') },
+        { label: 'G (DN₁₆)', value: mean('g') },
+        { label: 'B (DN₁₆)', value: mean('b') },
+      ];
+    },
+    get warnings() {
+      const scan = this.groups.flatMap((g) => (g.warnings || []).map((m) => ({ group: g.label, message: m })));
+      const analysed = (this.results && this.results.warnings) || [];
+      return scan.concat(analysed);
+    },
+
+    async init() { await this.load(); },
+
+    async load() {
+      try {
+        const r = await fetch(`/projects/${this.project}/characterisation/data`);
+        if (!r.ok) throw new Error();
+        const d = await r.json();
+        this.groups = d.groups || [];
+        this.results = d.results;
+        this.stale = !!d.stale;
+        this.$nextTick(() => { this.renderPtc(); this.renderSnr(); });
+      } catch (e) { this.error = 'Failed to load characterisation data'; }
+    },
+
+    analyse() { this.stream(''); },
+
+    // Live exposure sweep: drives the camera, so the numbers existing captures
+    // cannot supply (conversion gain, linearity, full well, DR) become measurable.
+    sweep() {
+      const params = new URLSearchParams({
+        mode: 'live', gains: this.sweepGains || '1',
+        points: this.sweepPoints, frames: this.sweepFrames,
+      });
+      this.stream(`?${params}`);
+    },
+
+    stream(query) {
+      if (this.running) return;
+      this.running = true; this.consoleUsed = true; this.exitCode = null; this.error = '';
+      const console = this.$refs.console;
+      console.innerHTML = '';
+      this.source = new EventSource(`/projects/${this.project}/characterisation/analyse/stream${query}`);
+      this.source.onmessage = (e) => {
+        const line = JSON.parse(e.data);
+        if (line.startsWith('CHAR_EXIT ')) {
+          this.exitCode = parseInt(line.slice(10), 10);
+          this.running = false;
+          this.source.close();
+          this.load();  // pick up the freshly persisted results
+          return;
+        }
+        const el = document.createElement('span');
+        el.className = 'ln ' + classify(line);
+        el.textContent = line;
+        console.appendChild(el);
+        const box = console.closest('.console') || console;
+        box.scrollTop = box.scrollHeight;
+      };
+      this.source.onerror = () => {
+        if (this.running) { this.running = false; this.error = 'Analysis stream interrupted'; }
+        if (this.source) this.source.close();
+      };
+    },
+
+    fmtExposure(us) {
+      if (us == null) return '—';
+      return us >= 1000 ? (us / 1000).toFixed(us >= 10000 ? 0 : 1) + ' ms' : us + ' µs';
+    },
+    fmtDn(v) { return v == null ? '—' : Number(v).toFixed(1); },
+
+    // Variance-vs-mean scatter: one series per gain family, clipped/chart
+    // points hollow and excluded from any drawn fit; a fit line only when the
+    // fit is statistically defensible (reliable).
+    renderPtc() {
+      const canvas = document.getElementById('ptcChart');
+      if (!canvas || !this.ptc.points.length) return;
+      if (this.ptcChart) { this.ptcChart.destroy(); this.ptcChart = null; }
+      const palette = ['#f06595', '#a5d8ff', '#b2f2bb', '#ffd8a8', '#d0bfff'];
+      const gains = [...new Set(this.ptc.points.map((p) => p.gain))].sort((a, b) => a - b);
+      const datasets = [];
+      gains.forEach((gain, i) => {
+        const solid = this.ptc.points.filter((p) => p.gain === gain && !p.clipped && p.source !== 'chart');
+        const hollow = this.ptc.points.filter((p) => p.gain === gain && (p.clipped || p.source === 'chart'));
+        if (solid.length) {
+          datasets.push({
+            label: `gain ${gain.toFixed(2)}`, type: 'scatter', pointRadius: 5,
+            backgroundColor: palette[i % palette.length],
+            data: solid.map((p) => ({ x: p.mean_dn, y: p.var_dn2 })),
+          });
+        }
+        if (hollow.length) {
+          datasets.push({
+            label: `gain ${gain.toFixed(2)} (excluded)`, type: 'scatter', pointRadius: 5,
+            backgroundColor: 'transparent', borderColor: '#6b7888', borderWidth: 1.5,
+            data: hollow.map((p) => ({ x: p.mean_dn, y: p.var_dn2 })),
+          });
+        }
+      });
+      for (const fit of this.ptc.fits.filter((f) => f.reliable)) {
+        const family = this.ptc.points.filter((p) => p.gain === fit.gain && !p.clipped && p.source !== 'chart');
+        const xs = family.map((p) => p.mean_dn);
+        const slope = 1 / fit.k_e_per_dn;
+        const intercept = fit.read_noise_dn ? fit.read_noise_dn ** 2 : 0;
+        datasets.push({
+          label: `fit (gain ${fit.gain.toFixed(2)})`, type: 'line', pointRadius: 0, borderWidth: 1.5,
+          borderColor: '#e6edf3',
+          data: [Math.min(...xs), Math.max(...xs)].map((x) => ({ x, y: slope * x + intercept })),
+        });
+      }
+      // Log-log: a PTC spans decades in both axes; linear axes crush the
+      // sweep into a corner and hide the straight-line (slope 1) region.
+      const opts = chartOpts('Mean signal (DN₁₆)', 'Temporal variance (DN₁₆²)');
+      opts.scales.x.type = 'logarithmic';
+      opts.scales.y.type = 'logarithmic';
+      this.ptcChart = new Chart(canvas.getContext('2d'), { data: { datasets }, options: opts });
+    },
+
+    // SNR vs signal from the live sweep: should follow the square-root
+    // (shot-noise) law up to a peak near full well.
+    renderSnr() {
+      const canvas = document.getElementById('snrChart');
+      if (!canvas || !this.snrCurve.length) return;
+      if (this.snrChart) { this.snrChart.destroy(); this.snrChart = null; }
+      this.snrChart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          datasets: [{
+            label: 'SNR', borderColor: '#f06595', backgroundColor: '#f06595',
+            pointRadius: 3, borderWidth: 1.5, showLine: true,
+            data: this.snrCurve.map((p) => ({ x: p.mean_dn, y: p.snr_db })),
+          }],
+        },
+        options: chartOpts('Mean signal (DN₁₆)', 'SNR (dB)'),
+      });
+    },
+  };
+}

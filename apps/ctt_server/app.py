@@ -32,7 +32,7 @@ from flask import (
 
 from devices import LightboxError, LightmeterError, get_shared_lightbox, get_shared_lightmeter
 
-from . import auto_capture, colour_check, ctt_runner, mtf, results
+from . import auto_capture, characterise, colour_check, ctt_runner, mtf, results
 from .camera import (
     MJPEG_CONTENT_TYPE,
     CameraError,
@@ -972,6 +972,53 @@ def create_app(workspace_root: str | None = None) -> Flask:
             logger.exception('MTF measurement failed for %s', name)
             return jsonify({'error': 'MTF measurement failed (is the capture a valid DNG?)'}), 500
         return jsonify({'rois': results_list})
+
+    # --- sensor characterisation --------------------------------------------
+    # Offline analysis of the project's existing captures (dark bursts, ALSC
+    # flat fields, Macbeth bursts). Results live in <project>/characterisation/,
+    # which calibration runs never scan — the same isolation as <project>/mtf/.
+
+    @app.route('/projects/<name>/characterisation')
+    def characterisation_page(name: str):
+        proj = get_project_or_404(name)
+        return render_template('characterisation.html', project=proj)
+
+    @app.route('/projects/<name>/characterisation/data')
+    def characterisation_data(name: str):
+        proj = get_project_or_404(name)
+        return jsonify({'results': characterise.read_results(proj), **characterise.quick_scan(proj)})
+
+    @app.route('/projects/<name>/characterisation/analyse/stream')
+    def characterisation_stream(name: str):
+        """Run an analysis, streaming progress over SSE (EventSource is GET-only).
+
+        mode=offline (default) walks the project's existing DNGs; mode=live
+        drives the camera through a manual exposure sweep (gains, points and
+        frames from the query string) for the sweep-derived metrics.
+        """
+        proj = get_project_or_404(name)
+        if request.args.get('mode') == 'live':
+            camera = camera_or_503()
+            gains = [float(g) for g in request.args.get('gains', '1').split(',') if g.strip()]
+            lines = characterise.sweep_stream(
+                proj,
+                camera,
+                gains,
+                points_per_gain=int(request.args.get('points', 10)),
+                frames=int(request.args.get('frames', 8)),
+            )
+        else:
+            lines = characterise.analyse_stream(proj)
+
+        def generate():
+            for line in lines:
+                yield f'data: {json.dumps(line)}\n\n'
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype='text/event-stream',
+            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+        )
 
     @app.route('/projects/<name>/results/data')
     def results_data(name: str):
