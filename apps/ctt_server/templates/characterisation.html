@@ -12,23 +12,19 @@
   <div class="card">
     <div class="card-head">
       <h2>Sensor characterisation</h2>
-      <div class="btn-row" style="align-items:center">
-        <span class="chip" x-show="exitCode !== null" :class="exitCode === 0 ? 'cac' : ''"
-              x-text="exitCode === 0 ? 'done' : 'exit ' + exitCode" x-cloak></span>
-        <button class="btn" :disabled="running || !groups.length" @click="analyse()">
-          <span x-text="running ? 'Working…' : 'Analyse captures'"></span>
-        </button>
-      </div>
+      <span class="chip" x-show="exitCode !== null" :class="exitCode === 0 ? 'cac' : ''"
+            x-text="exitCode === 0 ? 'done' : 'exit ' + exitCode" x-cloak></span>
     </div>
     <div class="banner error" x-show="error" x-text="error" x-cloak></div>
     <div class="banner info" x-show="stale" x-cloak>
-      Captures have changed since the last analysis — re-run Analyse captures.
+      Captures have changed since the last analysis — re-run the analysis.
     </div>
     <p class="hint" style="margin-top:0">Measures the sensor itself from raw captures. Dark bursts (lens cap on)
       provide the black level, read noise and DSNU; ALSC flat-field bursts provide PRNU and photon-transfer
       points; a live exposure sweep against a static, evenly lit target adds the conversion gain, linearity,
       full well and dynamic range. Statistics use the central ROI of a single green channel.</p>
-    <div class="field-row" style="align-items:flex-start; max-width:780px">
+
+    <div class="field-row" style="align-items:flex-start; max-width:640px">
       <div class="field" style="margin-bottom:0">
         <label>Sweep gains</label>
         <input type="text" x-model="sweepGains" placeholder="1  or  1,2,4,8">
@@ -44,17 +40,31 @@
         <input type="number" x-model.number="sweepFrames" min="2" max="16" step="1">
         <div class="hint">Burst size per step; more frames, cleaner noise estimates.</div>
       </div>
-      <div class="field" style="margin-bottom:0; flex:0 0 auto">
-        <label>&nbsp;</label>
-        <button class="btn primary" :disabled="running" @click="sweep()">
+    </div>
+
+    <!-- Primary path: the automated cycle (needs a lightbox + light meter). -->
+    <div class="field-row mt" style="align-items:center; gap:14px" x-show="autoCharAvailable()" x-cloak>
+      <button class="btn primary" :disabled="running || autoChar.running" @click="openAutoChar()">Auto-characterise…</button>
+      <span class="hint" style="margin:0">Runs the whole cycle for you — meter-gated sweep, flat field and dark
+        frames — capturing only what's missing and reusing the rest.</span>
+    </div>
+
+    <!-- The manual primitives the cycle is built from; open by default when no devices. -->
+    <details class="mt" :open="!autoCharAvailable()">
+      <summary class="muted">Manual steps</summary>
+      <p class="hint" style="margin-top:8px">Run an individual step — or use these when no lightbox and light meter
+        are attached. <b>Analyse captures</b> reads the DNGs already on disk (black level, read noise, DSNU, PRNU);
+        <b>Run sweep</b> drives the camera through the exposures above for conversion gain, linearity, full well
+        and dynamic range (needs a steady, static, evenly-lit target).</p>
+      <div class="btn-row">
+        <button class="btn" :disabled="running || !groups.length" @click="analyse()">
+          <span x-text="running ? 'Working…' : 'Analyse captures'"></span>
+        </button>
+        <button class="btn" :disabled="running" @click="sweep()">
           <span x-text="running ? 'Sweeping…' : '▶ Run sweep'"></span>
         </button>
       </div>
-      <div class="field" style="margin-bottom:0; flex:0 0 auto" x-show="autoCharAvailable()" x-cloak>
-        <label>&nbsp;</label>
-        <button class="btn" :disabled="running || autoChar.running" @click="openAutoChar()">Auto-characterise…</button>
-      </div>
-    </div>
+    </details>
     <div class="console" style="height: 180px; margin-top: 14px" x-show="running || consoleUsed" x-cloak>
       <div x-ref="console"></div>
     </div>

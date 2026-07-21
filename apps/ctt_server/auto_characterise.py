@@ -123,19 +123,12 @@ def _prep_dark(camera, gain: float) -> None:
 
 
 def _prep_flat(camera, gain: float, roi_fraction: float = 0.5) -> None:
-    """Manual gain at ~50 % of the DN swing: probe saturation, then expose to half of it,
-    so the flat is well-exposed and unclipped for PRNU."""
+    """Manual gain, exposed to ~50 % of the DN swing and verified unclipped, for PRNU."""
     exp_min = camera.get_controls().get('exposure_min') or 100
     camera.set_controls({'auto_exposure': False, 'gain': float(gain), 'exposure': int(exp_min), 'fps': 0, 'awb': False})
-    sat_exposure, _ = characterise._find_saturation(camera, float(gain), roi_fraction)
+    exposure = characterise.flat_exposure(camera, float(gain), roi_fraction)
     camera.set_controls(
-        {
-            'auto_exposure': False,
-            'gain': float(gain),
-            'exposure': max(sat_exposure // 2, int(exp_min)),
-            'fps': 0,
-            'awb': False,
-        }
+        {'auto_exposure': False, 'gain': float(gain), 'exposure': int(exposure), 'fps': 0, 'awb': False}
     )
 
 

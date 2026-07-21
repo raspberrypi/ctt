@@ -2576,33 +2576,37 @@ function characterisationApp(cfg) {
       if (!canvas || !this.ptc.points.length) return;
       if (this.ptcChart) { this.ptcChart.destroy(); this.ptcChart = null; }
       const palette = ['#f06595', '#a5d8ff', '#b2f2bb', '#ffd8a8', '#d0bfff'];
-      const gains = [...new Set(this.ptc.points.map((p) => p.gain))].sort((a, b) => a - b);
+      const usable = (p) => !p.clipped && p.source !== 'chart';
+      const gains = [...new Set(this.ptc.points.filter(usable).map((p) => p.gain))].sort((a, b) => a - b);
       const datasets = [];
+      // One solid series per usable gain family.
       gains.forEach((gain, i) => {
-        const solid = this.ptc.points.filter((p) => p.gain === gain && !p.clipped && p.source !== 'chart');
-        const hollow = this.ptc.points.filter((p) => p.gain === gain && (p.clipped || p.source === 'chart'));
-        if (solid.length) {
-          datasets.push({
-            label: `gain ${gain.toFixed(2)}`, type: 'scatter', pointRadius: 5,
-            backgroundColor: palette[i % palette.length],
-            data: solid.map((p) => ({ x: p.mean_dn, y: p.var_dn2 })),
-          });
-        }
-        if (hollow.length) {
-          datasets.push({
-            label: `gain ${gain.toFixed(2)} (excluded)`, type: 'scatter', pointRadius: 5,
-            backgroundColor: 'transparent', borderColor: '#6b7888', borderWidth: 1.5,
-            data: hollow.map((p) => ({ x: p.mean_dn, y: p.var_dn2 })),
-          });
-        }
+        const pts = this.ptc.points.filter((p) => usable(p) && p.gain === gain);
+        datasets.push({
+          label: `gain ${gain.toFixed(2)}`, type: 'scatter', pointRadius: 5,
+          backgroundColor: palette[i % palette.length],
+          data: pts.map((p) => ({ x: p.mean_dn, y: p.var_dn2 })),
+        });
       });
+      // All clipped/chart points collapse into a single hollow "excluded" series.
+      const excluded = this.ptc.points.filter((p) => !usable(p));
+      if (excluded.length) {
+        datasets.push({
+          label: 'excluded (clipped / chart)', type: 'scatter', pointRadius: 4,
+          backgroundColor: 'transparent', borderColor: '#6b7888', borderWidth: 1.5,
+          data: excluded.map((p) => ({ x: p.mean_dn, y: p.var_dn2 })),
+        });
+      }
       for (const fit of this.ptc.fits.filter((f) => f.reliable)) {
-        const family = this.ptc.points.filter((p) => p.gain === fit.gain && !p.clipped && p.source !== 'chart');
+        // Match the family by tolerance: the fit gain is rounded, the points' gain is
+        // the full-precision readback (e.g. 3.9811), so === would never match.
+        const family = this.ptc.points.filter((p) => usable(p) && Math.abs(p.gain - fit.gain) <= 0.05);
+        if (!family.length) continue;
         const xs = family.map((p) => p.mean_dn);
         const slope = 1 / fit.k_e_per_dn;
         const intercept = fit.read_noise_dn ? fit.read_noise_dn ** 2 : 0;
         datasets.push({
-          label: `fit (gain ${fit.gain.toFixed(2)})`, type: 'line', pointRadius: 0, borderWidth: 1.5,
+          label: `fit (gain ${fit.gain.toFixed(2)})`, type: 'line', pointRadius: 0, borderWidth: 2,
           borderColor: '#e6edf3',
           data: [Math.min(...xs), Math.max(...xs)].map((x) => ({ x, y: slope * x + intercept })),
         });
@@ -2621,16 +2625,20 @@ function characterisationApp(cfg) {
       const canvas = document.getElementById('snrChart');
       if (!canvas || !this.snrCurve.length) return;
       if (this.snrChart) { this.snrChart.destroy(); this.snrChart = null; }
+      // Explicit logarithmic x: without a set type a line chart uses a category axis,
+      // which stacks the points into a vertical line. Sort so the line reads left→right.
+      const pts = [...this.snrCurve].sort((a, b) => a.mean_dn - b.mean_dn);
+      const opts = chartOpts('Mean signal (DN₁₆)', 'SNR (dB)');
+      opts.scales.x.type = 'logarithmic';
       this.snrChart = new Chart(canvas.getContext('2d'), {
-        type: 'line',
         data: {
           datasets: [{
-            label: 'SNR', borderColor: '#f06595', backgroundColor: '#f06595',
-            pointRadius: 3, borderWidth: 1.5, showLine: true,
-            data: this.snrCurve.map((p) => ({ x: p.mean_dn, y: p.snr_db })),
+            label: 'SNR', type: 'line', borderColor: '#f06595', backgroundColor: '#f06595',
+            pointRadius: 3, borderWidth: 2, showLine: true,
+            data: pts.map((p) => ({ x: p.mean_dn, y: p.snr_db })),
           }],
         },
-        options: chartOpts('Mean signal (DN₁₆)', 'SNR (dB)'),
+        options: opts,
       });
     },
   };

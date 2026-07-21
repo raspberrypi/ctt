@@ -174,3 +174,49 @@ def test_page_renders(client, project):
     r = client.get('/projects/imx662/characterisation')
     assert r.status_code == 200
     assert b'characterisationApp' in r.data
+
+
+def test_carry_live_sweep_preserves_sweep_metrics():
+    # A fresh offline analysis must not drop a prior live sweep's derived metrics.
+    prev = {
+        'ptc': {
+            'points': [
+                {
+                    'mean_dn': 100.0,
+                    'var_dn2': 50.0,
+                    'exposure_us': 100,
+                    'gain': 1.0,
+                    'n_frames': 8,
+                    'clipped': False,
+                    'label': 's',
+                    'source': 'live',
+                },
+                {
+                    'mean_dn': 5000.0,
+                    'var_dn2': 2500.0,
+                    'exposure_us': 5000,
+                    'gain': 1.0,
+                    'n_frames': 8,
+                    'clipped': False,
+                    'label': 's',
+                    'source': 'live',
+                },
+            ],
+            'fits': [{'gain': 1.0, 'reliable': True}],
+        },
+        'linearity': {'available': True, 'r2': 0.999},
+        'full_well': {'available': True, 'full_well_e': 12000},
+        'dynamic_range': {'available': True, 'db': 60.0},
+    }
+    results = {'ptc': {'points': [], 'fits': [], 'unavailable_reason': 'needs a sweep'}, 'dark': {'available': False}}
+    characterise._carry_live_sweep(results, prev)
+    assert results['linearity'] == prev['linearity']
+    assert results['full_well'] == prev['full_well']
+    assert results['dynamic_range'] == prev['dynamic_range']
+    assert [p['source'] for p in results['ptc']['points']] == ['live', 'live']  # live points re-added
+
+
+def test_carry_live_sweep_noop_without_previous():
+    results = {'ptc': {'points': [], 'fits': []}, 'dark': {'available': False}}
+    characterise._carry_live_sweep(results, None)
+    assert results['ptc']['points'] == [] and 'linearity' not in results
