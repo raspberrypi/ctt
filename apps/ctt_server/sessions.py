@@ -93,6 +93,7 @@ class Capture:
     controls: dict = field(default_factory=dict)
     captured_at: str = field(default_factory=_now_iso)
     excluded: bool = False  # excluded from CTT runs; the file stays on disk
+    lightmeter: dict | None = None  # measured reading at capture time, when a meter was present
 
 
 class Project:
@@ -157,6 +158,7 @@ class Project:
         controls: dict | None = None,
         jpeg_bytes: bytes | None = None,
         indexed: bool = False,
+        lightmeter: dict | None = None,
     ) -> Capture:
         """Write a DNG with a CTT-correct filename and record its metadata.
 
@@ -187,6 +189,7 @@ class Project:
             lux=lux,
             label=label,
             controls=controls or {},
+            lightmeter=lightmeter,
         )
         # Re-capturing the same filename overwrites the DNG on disk (above), so
         # replace the existing metadata entry in place rather than duplicating it.

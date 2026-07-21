@@ -167,6 +167,7 @@ function captureApp(cfg) {
     captures: cfg.captures || [],
     counts: { macbeth: 0, alsc: 0, cac: 0, dark: 0 },
     form: { image_type: 'macbeth', colour_temp: 6500, lux: 1000, frames: 1 },
+    autoTag: false,  // tag capture filenames from the light meter's live reading
     controls: { exposure: 10000, gain: 1.0, auto_exposure: true, colour_temp: 0, lux: 0, ev: 0 },
     fpsTarget: 30,  // framerate target; 0 = unconstrained (variable frame duration)
     camera: { model: '', resolution: null },
@@ -174,7 +175,7 @@ function captureApp(cfg) {
     clip: { r: 0, g: 0, b: 0 },
     macbeth: { found: false, confidence: null, corners: null, small: false, saturated: false },
     lightbox: { present: false, channel: null, illuminant: '', intensity: 0, illuminants: {} },
-    lightmeter: { present: false, model: '', serial: '', reading: null, busy: false },
+    lightmeter: { present: false, model: '', serial: '', reading: null, busy: false, auto: true, updated: '' },
     busy: false,
     error: '',
     hflip: false,
@@ -226,11 +227,13 @@ function captureApp(cfg) {
         const r = await fetch('/api/lightbox');
         if (!r.ok) return;
         const lb = await r.json();
-        let ch = lb.channel;  // capture before mutating: lb IS this.lightbox below
+        let ch = lb.channel;
         // A fresh device reports channel 0 (nothing selected yet); snap to the
         // first illuminant so the model matches what the dropdown renders.
         if (lb.present && lb.illuminants && lb.illuminants[ch] == null) ch = Number(Object.keys(lb.illuminants)[0]);
-        this.lightbox = lb;
+        // Merge over the defaults: a "not present" reply carries no illuminants map,
+        // and templates evaluate Object.entries(lightbox.illuminants) regardless.
+        this.lightbox = { ...this.lightbox, ...lb };
         if (lb.present && ch != null) {
           // Re-assert the active channel once the <select>'s x-for <option>s exist:
           // Alpine applies x-model before the options render, so the dropdown would
@@ -248,7 +251,7 @@ function captureApp(cfg) {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        if (r.ok) { this.lightbox = await r.json(); }
+        if (r.ok) { this.lightbox = { ...this.lightbox, ...(await r.json()) }; }
         else { const d = await r.json().catch(() => ({})); this.error = d.error || 'Lightbox command failed'; }
       } catch (e) { this.error = 'Lightbox request failed'; }
     },
@@ -272,6 +275,14 @@ function captureApp(cfg) {
         const r = await fetch('/api/lightmeter');
         if (!r.ok) return;
         this.lightmeter = { ...this.lightmeter, ...(await r.json()) };
+        // With a meter present, keep the readout live: sample now, then on a timer,
+        // skipping ticks while a request is in flight or the tab is hidden.
+        if (this.lightmeter.present && !this._lmTimer) {
+          this._lmTimer = setInterval(() => {
+            if (this.lightmeter.auto && !this.lightmeter.busy && !document.hidden) this.sampleLightmeter();
+          }, 5000);
+          if (this.lightmeter.auto) this.sampleLightmeter();
+        }
       } catch (e) { /* the light meter is optional */ }
     },
 
@@ -282,10 +293,23 @@ function captureApp(cfg) {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'sample' }),
         });
-        if (r.ok) { this.lightmeter = { ...this.lightmeter, ...(await r.json()) }; }
+        if (r.ok) {
+          this.lightmeter = { ...this.lightmeter, ...(await r.json()) };
+          this.lightmeter.updated = new Date().toLocaleTimeString();
+          if (this.autoTag) this.tagFromMeter();  // capture page only; unset elsewhere
+        }
         else { const d = await r.json().catch(() => ({})); this.error = d.error || 'Light-meter sample failed'; }
       } catch (e) { this.error = 'Light-meter request failed'; }
       finally { this.lightmeter.busy = false; }
+    },
+
+    // Copy the latest meter reading into the capture tags (rounded to the
+    // filename's integer convention).
+    tagFromMeter() {
+      const r = this.lightmeter.reading;
+      if (!r) return;
+      this.form.colour_temp = Math.round(r.cct);
+      this.form.lux = Math.round(r.illuminance_lux);
     },
 
     updateCounts() {
@@ -886,7 +910,7 @@ function resultsApp(cfg) {
     controls: { auto_exposure: true, exposure: 0, gain: 1, ev: 0 },  // exposure panel state
     fpsTarget: 30,  // framerate target; 0 = unconstrained (variable frame duration)
     lightbox: { present: false, channel: null, intensity: 0, illuminants: {} },  // optional lightbox device
-    lightmeter: { present: false, model: '', serial: '', reading: null, busy: false },  // optional light meter
+    lightmeter: { present: false, model: '', serial: '', reading: null, busy: false, auto: true, updated: '' },  // optional light meter
     colour: null,         // current live ΔE reading (for whichever tuning is loaded)
     liveColour: true,     // semi-live colour measurement while previewing
     chartSeen: null,      // null = no reading yet, false = chart not found, {confidence} = found
@@ -1144,11 +1168,13 @@ function resultsApp(cfg) {
         const r = await fetch('/api/lightbox');
         if (!r.ok) return;
         const lb = await r.json();
-        let ch = lb.channel;  // capture before mutating: lb IS this.lightbox below
+        let ch = lb.channel;
         // A fresh device reports channel 0 (nothing selected yet); snap to the
         // first illuminant so the model matches what the dropdown renders.
         if (lb.present && lb.illuminants && lb.illuminants[ch] == null) ch = Number(Object.keys(lb.illuminants)[0]);
-        this.lightbox = lb;
+        // Merge over the defaults: a "not present" reply carries no illuminants map,
+        // and templates evaluate Object.entries(lightbox.illuminants) regardless.
+        this.lightbox = { ...this.lightbox, ...lb };
         if (lb.present && ch != null) {
           // Re-assert the active channel once the <select>'s x-for options exist
           // (Alpine applies x-model before they render, else it shows the first).
@@ -1163,7 +1189,7 @@ function resultsApp(cfg) {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        if (r.ok) this.lightbox = await r.json();
+        if (r.ok) this.lightbox = { ...this.lightbox, ...(await r.json()) };
         else { const d = await r.json().catch(() => ({})); this.testError = d.error || 'Lightbox command failed'; }
       } catch (e) { this.testError = 'Lightbox request failed'; }
     },
@@ -1176,6 +1202,14 @@ function resultsApp(cfg) {
         const r = await fetch('/api/lightmeter');
         if (!r.ok) return;
         this.lightmeter = { ...this.lightmeter, ...(await r.json()) };
+        // With a meter present, keep the readout live: sample now, then on a timer,
+        // skipping ticks while a request is in flight or the tab is hidden.
+        if (this.lightmeter.present && !this._lmTimer) {
+          this._lmTimer = setInterval(() => {
+            if (this.lightmeter.auto && !this.lightmeter.busy && !document.hidden) this.sampleLightmeter();
+          }, 5000);
+          if (this.lightmeter.auto) this.sampleLightmeter();
+        }
       } catch (e) { /* the light meter is optional */ }
     },
 
@@ -1186,7 +1220,11 @@ function resultsApp(cfg) {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'sample' }),
         });
-        if (r.ok) { this.lightmeter = { ...this.lightmeter, ...(await r.json()) }; }
+        if (r.ok) {
+          this.lightmeter = { ...this.lightmeter, ...(await r.json()) };
+          this.lightmeter.updated = new Date().toLocaleTimeString();
+          if (this.autoTag) this.tagFromMeter();  // capture page only; unset elsewhere
+        }
         else { const d = await r.json().catch(() => ({})); this.error = d.error || 'Light-meter sample failed'; }
       } catch (e) { this.error = 'Light-meter request failed'; }
       finally { this.lightmeter.busy = false; }

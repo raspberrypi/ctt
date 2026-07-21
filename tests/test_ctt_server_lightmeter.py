@@ -8,7 +8,9 @@
 import pytest
 
 from ctt_server import app as app_module
+from ctt_server.sessions import Workspace
 from devices import LightmeterError, Measurement
+from devices.lightmeter import Spectrum
 
 
 class FakeMeter:
@@ -26,11 +28,22 @@ class FakeMeter:
         self.calls.append('measure')
         if self.fail:
             raise LightmeterError('measurement failed')
-        self._latest = Measurement(illuminance_lux=234.5, cct=6543.0, duv=0.0021)
+        self._latest = Measurement(
+            illuminance_lux=234.5,
+            cct=6543.0,
+            duv=0.0021,
+            spectrum_5nm=Spectrum(start_nm=380.0, step_nm=5.0, values=(0.5,) * 81),
+            spectrum_1nm=Spectrum(start_nm=380.0, step_nm=1.0, values=(0.5,) * 401),
+        )
         return self._latest
 
     def read_latest(self):
         return self._latest
+
+
+class FakeCam:
+    def capture_burst(self, frames, quality=95):
+        return [(b'DNG', b'JPG', {'exposure': 1})] * frames
 
 
 @pytest.fixture
@@ -87,3 +100,50 @@ def test_post_measure_error_is_400(client, monkeypatch):
 def test_post_when_absent_is_503(client, monkeypatch):
     monkeypatch.setattr(app_module, 'get_shared_lightmeter', lambda: (_ for _ in ()).throw(LightmeterError('no meter')))
     assert client.post('/api/lightmeter', json={'action': 'sample'}).status_code == 503
+
+
+# --- capture-time recording ---------------------------------------------------
+@pytest.fixture
+def capture_client(tmp_path, monkeypatch):
+    Workspace(tmp_path).create_project('cam')
+    monkeypatch.setattr(app_module, 'get_shared_camera', lambda: FakeCam())
+    return app_module.create_app(tmp_path).test_client()
+
+
+def test_capture_records_a_reading(capture_client, tmp_path, monkeypatch):
+    meter = FakeMeter()
+    monkeypatch.setattr(app_module, 'get_shared_lightmeter', lambda: meter)
+    r = capture_client.post('/projects/cam/capture', json={'image_type': 'macbeth', 'colour_temp': 5000, 'lux': 800})
+    assert r.status_code == 200
+    recorded = r.get_json()['added'][0]['lightmeter']
+    assert recorded['illuminance_lux'] == 234.5
+    assert recorded['cct'] == 6543.0
+    assert 'spectrum_5nm' in recorded
+    assert 'spectrum_1nm' not in recorded  # trimmed to keep the sidecar compact
+    # The reading is persisted in the project sidecar.
+    proj = Workspace(tmp_path).get_project('cam')
+    assert proj.captures[0].lightmeter['illuminance_lux'] == 234.5
+
+
+def test_burst_frames_share_one_reading(capture_client, monkeypatch):
+    meter = FakeMeter()
+    monkeypatch.setattr(app_module, 'get_shared_lightmeter', lambda: meter)
+    r = capture_client.post('/projects/cam/capture', json={'image_type': 'alsc', 'colour_temp': 5000, 'frames': 3})
+    added = r.get_json()['added']
+    assert len(added) == 3
+    assert meter.calls == ['measure']  # one reading tags the whole burst
+    assert all(c['lightmeter']['cct'] == 6543.0 for c in added)
+
+
+def test_capture_without_meter_records_none(capture_client, monkeypatch):
+    monkeypatch.setattr(app_module, 'get_shared_lightmeter', lambda: (_ for _ in ()).throw(LightmeterError('no meter')))
+    r = capture_client.post('/projects/cam/capture', json={'image_type': 'macbeth', 'colour_temp': 5000, 'lux': 800})
+    assert r.status_code == 200
+    assert r.get_json()['added'][0]['lightmeter'] is None
+
+
+def test_capture_survives_a_meter_failure(capture_client, monkeypatch):
+    monkeypatch.setattr(app_module, 'get_shared_lightmeter', lambda: FakeMeter(fail=True))
+    r = capture_client.post('/projects/cam/capture', json={'image_type': 'macbeth', 'colour_temp': 5000, 'lux': 800})
+    assert r.status_code == 200
+    assert r.get_json()['added'][0]['lightmeter'] is None
