@@ -83,7 +83,7 @@ def stub_characterise(monkeypatch):
 
     monkeypatch.setattr(characterise, 'quick_scan', lambda proj: {'groups': [], 'has_results': False, 'stale': False})
     monkeypatch.setattr(characterise, 'read_results', lambda proj: None)
-    monkeypatch.setattr(characterise, '_find_saturation', lambda cam, gain, roi: (2000, 60000.0))
+    monkeypatch.setattr(characterise, 'flat_exposure', lambda cam, gain, roi_fraction=0.5, target=0.5: 1000)
 
     def fake_sweep(proj, cam, gains, points_per_gain=10, frames=8):
         calls['sweep'].append(list(gains))

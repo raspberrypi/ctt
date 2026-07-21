@@ -208,6 +208,7 @@ def analyse_stream(project: Project, roi_fraction: float = 0.5) -> Iterator[str]
         yield 'ERROR: a characterisation analysis is already running'
         yield 'CHAR_EXIT 2'
         return
+    existing = read_results(project)  # to carry a prior live sweep across this re-analysis
     try:
         yield f'$ characterise (offline)  project={project.name}  roi={roi_fraction:.2f}'
         groups = scan_project(project.path, _excluded(project))
@@ -350,6 +351,11 @@ def analyse_stream(project: Project, roi_fraction: float = 0.5) -> Iterator[str]
             g0 = groups[0]
             results['camera'] = {'width': g0.width, 'height': g0.height, 'sigbits': g0.sigbits, 'channel': None}
 
+        # A prior live exposure sweep is not reproducible from the DNGs on disk, so
+        # carry it across this re-analysis rather than dropping conversion gain,
+        # linearity, full well and dynamic range.
+        _carry_live_sweep(results, existing)
+
         out = results_path(project)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(results, indent=2))
@@ -376,6 +382,58 @@ _SWEEP_EXPOSURE_CAP_US = 1_000_000  # 1 s: enough to saturate any sane scene
 def _point_from_dict(entry: dict) -> PtcPoint:
     fields = ('mean_dn', 'var_dn2', 'exposure_us', 'gain', 'n_frames', 'clipped', 'label', 'source')
     return PtcPoint(**{k: entry[k] for k in fields})
+
+
+# Sweep-derived sections: computed from live points, not reproducible from DNGs.
+_SWEEP_SECTIONS = ('sweep', 'gain_sweep', 'linearity', 'full_well', 'dynamic_range', 'snr_curve')
+
+
+def _carry_live_sweep(results: dict, prev: dict | None) -> None:
+    """Preserve a previous live sweep across a fresh offline analysis.
+
+    A live exposure sweep captures no DNGs, so re-walking the project cannot
+    reproduce it. Re-add the prior live PTC points (re-fitting them together with
+    the offline points), carry the sweep-only sections verbatim, and refresh the
+    electron-referred dark metrics from the reliable fit.
+    """
+    if not prev:
+        return
+    for key in _SWEEP_SECTIONS:
+        if key in prev:
+            results[key] = prev[key]
+    live = [p for p in prev.get('ptc', {}).get('points', []) if p.get('source') == 'live']
+    if not live:
+        return
+    results['ptc']['points'] = results['ptc']['points'] + live
+    fits = fit_ptc([_point_from_dict(p) for p in results['ptc']['points']])
+    results['ptc']['fits'] = [asdict(f) for f in fits]
+    reliable = next((f for f in fits if f.reliable), None)
+    if reliable is None:
+        return
+    results['ptc']['unavailable_reason'] = None
+    dark = results.get('dark', {})
+    if dark.get('available'):
+        k = reliable.k_e_per_dn
+        if dark.get('read_noise_dn') is not None:
+            dark['read_noise_e'] = round(dark['read_noise_dn'] * k, 2)
+        if dark.get('dsnu_dn') is not None:
+            dark['dsnu_e'] = round(dark['dsnu_dn'] * k, 2)
+
+
+def flat_exposure(camera, gain: float, roi_fraction: float = 0.5, target: float = 0.5) -> int:
+    """An exposure that lands the flat field near `target` of the DN swing, unclipped.
+
+    Starts from half the saturation exposure and backs off until the ROI mean is
+    comfortably below saturation, so the flat is usable for PRNU.
+    """
+    sat_exposure, swing = _find_saturation(camera, gain, roi_fraction)
+    exposure = max(int(sat_exposure * target), 50)
+    for _ in range(4):
+        ts = temporal_stats(_sweep_frameset(camera, 2, exposure, gain, roi_fraction, 'flat-probe'))
+        if ts is None or ts.mean_dn <= 0.7 * swing:
+            break
+        exposure = max(int(exposure * 0.6), 50)
+    return exposure
 
 
 def _sweep_frameset(camera, frames: int, exposure_us: int, gain: float, roi_fraction: float, label: str) -> FrameSet:
@@ -542,9 +600,12 @@ def sweep_stream(
             )
         results['gain_sweep'] = {'available': len(gains) > 1, 'gains': gain_summaries}
 
-        base_gain = gains[0]
-        base_fit = reliable_by_gain.get(base_gain)
-        live_base = [p for p in points if p.gain == base_gain]
+        # Base the single-gain metrics on the first family's *readback* gain: the
+        # applied gain differs slightly from the requested value (e.g. 3.98 vs 4.0),
+        # so points, fits and the base gain must all be matched with tolerance.
+        base_gain = points[0].gain if points else gains[0]
+        base_fit = next((f for f in fits if f.reliable and abs(f.gain - base_gain) <= 0.05), None)
+        live_base = [p for p in points if abs(p.gain - base_gain) <= 0.05]
         lin = linearity(live_base)
         results['linearity'] = {'available': lin is not None, **(lin or {})}
         fw = full_well(live_base)
