@@ -12,8 +12,8 @@ or VC4 ISP platforms.
   inspecting results, served from the Pi
 - [CTT CLI](https://github.com/raspberrypi/ctt/blob/main/docs/ctt-cli.md) — command-line usage, options, configuration and
   calibration image requirements
-- [Device control](https://github.com/raspberrypi/ctt/blob/main/docs/device-control.md) — USB lightbox control (API and
-  `ctt-lightbox` CLI)
+- [Device control](https://github.com/raspberrypi/ctt/blob/main/docs/device-control.md) — USB lightbox control and light-meter
+  readout (APIs plus the `ctt-lightbox` and `ctt-lightmeter` CLIs)
 - [Developers](https://github.com/raspberrypi/ctt/blob/main/docs/developers.md) — repository layout, linting, tests and
   packaging
 

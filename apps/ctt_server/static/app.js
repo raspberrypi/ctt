@@ -174,6 +174,7 @@ function captureApp(cfg) {
     clip: { r: 0, g: 0, b: 0 },
     macbeth: { found: false, confidence: null, corners: null, small: false, saturated: false },
     lightbox: { present: false, channel: null, illuminant: '', intensity: 0, illuminants: {} },
+    lightmeter: { present: false, model: '', serial: '', reading: null, busy: false },
     busy: false,
     error: '',
     hflip: false,
@@ -196,6 +197,7 @@ function captureApp(cfg) {
         this.connected = false;
       }
       this.loadLightbox();  // independent of the camera
+      this.loadLightmeter();
       if (this.connected) {
         // Returning from a Results-page preview test: restore the default tuning.
         // Idempotent server-side (no-op when already on the default).
@@ -264,6 +266,27 @@ function captureApp(cfg) {
     },
     applyLightbox() { this.postLightbox({ channel: Number(this.lightbox.channel), percent: this.lightbox.intensity }); },
     lightboxOff() { this.postLightbox({ off: true }); },
+
+    async loadLightmeter() {
+      try {
+        const r = await fetch('/api/lightmeter');
+        if (!r.ok) return;
+        this.lightmeter = { ...this.lightmeter, ...(await r.json()) };
+      } catch (e) { /* the light meter is optional */ }
+    },
+
+    async sampleLightmeter() {
+      this.lightmeter.busy = true;
+      try {
+        const r = await fetch('/api/lightmeter', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'sample' }),
+        });
+        if (r.ok) { this.lightmeter = { ...this.lightmeter, ...(await r.json()) }; }
+        else { const d = await r.json().catch(() => ({})); this.error = d.error || 'Light-meter sample failed'; }
+      } catch (e) { this.error = 'Light-meter request failed'; }
+      finally { this.lightmeter.busy = false; }
+    },
 
     updateCounts() {
       const c = { macbeth: 0, alsc: 0, cac: 0, dark: 0 };
@@ -863,6 +886,7 @@ function resultsApp(cfg) {
     controls: { auto_exposure: true, exposure: 0, gain: 1, ev: 0 },  // exposure panel state
     fpsTarget: 30,  // framerate target; 0 = unconstrained (variable frame duration)
     lightbox: { present: false, channel: null, intensity: 0, illuminants: {} },  // optional lightbox device
+    lightmeter: { present: false, model: '', serial: '', reading: null, busy: false },  // optional light meter
     colour: null,         // current live ΔE reading (for whichever tuning is loaded)
     liveColour: true,     // semi-live colour measurement while previewing
     chartSeen: null,      // null = no reading yet, false = chart not found, {confidence} = found
@@ -875,6 +899,7 @@ function resultsApp(cfg) {
       // Preview page: auto-start the generated tuning, or the existing (built-in)
       // one when the project has no generated tuning yet.
       if (this.autoPreview) { (this.hasTuning ? this.startPreviewTest() : this.previewStandard()); this.loadLightbox(); }
+      this.loadLightmeter();
       if (cfg.allTargets) this.loadAll();              // Results page: new/old + per-target ALSC
       else this.select(this.target);                   // Tuning/Preview: single target
     },
@@ -1145,6 +1170,27 @@ function resultsApp(cfg) {
     setIlluminant() { this.postLightbox({ channel: Number(this.lightbox.channel) }); },
     applyLightbox() { this.postLightbox({ channel: Number(this.lightbox.channel), percent: this.lightbox.intensity }); },
     lightboxOff() { this.postLightbox({ off: true }); },
+
+    async loadLightmeter() {
+      try {
+        const r = await fetch('/api/lightmeter');
+        if (!r.ok) return;
+        this.lightmeter = { ...this.lightmeter, ...(await r.json()) };
+      } catch (e) { /* the light meter is optional */ }
+    },
+
+    async sampleLightmeter() {
+      this.lightmeter.busy = true;
+      try {
+        const r = await fetch('/api/lightmeter', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'sample' }),
+        });
+        if (r.ok) { this.lightmeter = { ...this.lightmeter, ...(await r.json()) }; }
+        else { const d = await r.json().catch(() => ({})); this.error = d.error || 'Light-meter sample failed'; }
+      } catch (e) { this.error = 'Light-meter request failed'; }
+      finally { this.lightmeter.busy = false; }
+    },
 
     async previewStandard() {
       // Switch the live preview to the camera's default (built-in) tuning, for

@@ -29,7 +29,7 @@ from flask import (
     url_for,
 )
 
-from devices import LightboxError, get_shared_lightbox
+from devices import LightboxError, LightmeterError, get_shared_lightbox, get_shared_lightmeter
 
 from . import colour_check, ctt_runner, mtf, results
 from .camera import (
@@ -199,6 +199,29 @@ def create_app(workspace_root: str | None = None) -> Flask:
         try:
             return {'present': True, **box.info()}
         except LightboxError:  # device went away mid-session
+            return {'present': False}
+
+    def lightmeter_or_none():
+        """The shared light meter, or None when no device (or backend) is available."""
+        try:
+            return get_shared_lightmeter()
+        except LightmeterError:
+            return None
+
+    def lightmeter_or_503():
+        meter = lightmeter_or_none()
+        if meter is None:
+            abort(503, 'No light meter detected')
+        return meter
+
+    def lightmeter_status() -> dict:
+        """Read-only identity snapshot (takes no measurement, leaves the device alone)."""
+        meter = lightmeter_or_none()
+        if meter is None:
+            return {'present': False}
+        try:
+            return {'present': True, **meter.info()}
+        except LightmeterError:  # device went away mid-session
             return {'present': False}
 
     # --- pages -------------------------------------------------------------
@@ -439,6 +462,25 @@ def create_app(workspace_root: str | None = None) -> Flask:
         except (LightboxError, TypeError, ValueError) as err:
             return jsonify({'error': str(err)}), 400
         return jsonify(lightbox_status())
+
+    # --- light-meter API ---------------------------------------------------
+    @app.route('/api/lightmeter', methods=['GET'])
+    def api_lightmeter():
+        return jsonify(lightmeter_status())
+
+    @app.route('/api/lightmeter', methods=['POST'])
+    def api_sample_lightmeter():
+        meter = lightmeter_or_503()
+        body = request.get_json(force=True) or {}
+        action = body.get('action', 'sample')
+        try:
+            if action == 'sample':
+                reading = meter.measure()
+            else:
+                return jsonify({'error': f'unknown action {action!r}'}), 400
+        except LightmeterError as err:
+            return jsonify({'error': str(err)}), 400
+        return jsonify({'present': True, **meter.info(), 'reading': reading.to_dict()})
 
     @app.route('/projects/<name>/capture', methods=['POST'])
     def capture(name: str):
