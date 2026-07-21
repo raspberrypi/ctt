@@ -2320,6 +2320,10 @@ function characterisationApp(cfg) {
     sweepGains: '1',      // live-sweep parameters
     sweepPoints: 10,
     sweepFrames: 8,
+    // Auto-characterise (needs a lightbox + light meter): gap-driven cycle.
+    devices: { lightbox: null, lightmeter: false },
+    autoChar: { open: false, running: false, waitingUser: false, lamp: null, intensity: 100,
+                darks: true, flats: true, sweep: true, prog: null, source: null },
 
     // Sections with safe defaults so the template renders before data arrives.
     get dark() { return (this.results && this.results.dark) || { available: false }; },
@@ -2412,7 +2416,99 @@ function characterisationApp(cfg) {
       return scan.concat(analysed);
     },
 
-    async init() { await this.load(); },
+    async init() { await this.load(); await this.loadDevices(); },
+
+    async loadDevices() {
+      // Auto-characterise needs both a lightbox (for steady light) and a meter.
+      try {
+        const [lb, lm] = await Promise.all([
+          fetch(`/api/lightbox`).then((r) => r.json()),
+          fetch(`/api/lightmeter`).then((r) => r.json()),
+        ]);
+        this.devices.lightbox = lb.present ? lb : null;
+        this.devices.lightmeter = !!lm.present;
+      } catch (e) { /* devices are optional */ }
+    },
+
+    autoCharAvailable() {
+      return !!(this.devices.lightbox && this.devices.lightmeter);
+    },
+
+    openAutoChar() {
+      const lb = this.devices.lightbox || {};
+      const labels = lb.illuminant_labels || {};
+      const defaults = lb.illuminant_defaults || {};
+      this.autoChar.lamps = Object.entries(lb.illuminants || {}).map(([ch, name]) => ({
+        channel: Number(ch), illuminant: name, label: labels[ch] || name, percent: Math.round(defaults[ch] ?? 100),
+      }));
+      // Default to the brightest lamp (highest channel — the halogens) for the sweep.
+      this.autoChar.lamp = this.autoChar.lamps.length ? this.autoChar.lamps[this.autoChar.lamps.length - 1].illuminant : null;
+      this.autoChar.open = true;
+    },
+
+    startAutoChar() {
+      if (this.running || !this.autoChar.lamp) return;
+      const lamp = this.autoChar.lamps.find((l) => l.illuminant === this.autoChar.lamp);
+      this.autoChar.open = false;
+      this.autoChar.running = true;
+      this.autoChar.waitingUser = false;
+      this.autoChar.prog = { plan: [], phase: '', log: [], reused: [], captured: [], swept: [],
+                             done: false, ok: null, cancelled: false, cancelling: false, error: '' };
+      const params = new URLSearchParams({
+        gains: this.sweepGains || '1', lamp: this.autoChar.lamp,
+        intensity: lamp ? lamp.percent : 100,
+        darks: this.autoChar.darks ? '1' : '0', flats: this.autoChar.flats ? '1' : '0',
+        sweep: this.autoChar.sweep ? '1' : '0',
+        sweep_points: this.sweepPoints, sweep_frames: this.sweepFrames,
+      });
+      this.autoChar.source = new EventSource(`/projects/${this.project}/auto-characterise/stream?${params}`);
+      this.autoChar.source.onmessage = (e) => this.autoCharEvent(JSON.parse(e.data));
+      this.autoChar.source.onerror = () => {
+        if (this.autoChar.running) { this.autoChar.prog.error = 'stream interrupted'; this.finishAutoChar(false); }
+      };
+    },
+
+    autoCharEvent(ev) {
+      const p = this.autoChar.prog;
+      switch (ev.event) {
+        case 'plan': p.plan = ev.gains; break;
+        case 'phase': p.phase = ev.gain != null ? `${ev.name} (gain ${ev.gain})` : ev.name; break;
+        case 'log': p.log.push(ev.line); if (p.log.length > 400) p.log.shift(); break;
+        case 'reading':
+          p.phase = `stabilising ${ev.illuminant}: ${ev.lux.toFixed(0)} lx · ${ev.cct.toFixed(0)} K`
+            + ` — stable ${ev.stable_count}/${ev.needed}`;
+          break;
+        case 'captured': p.captured.push(`${ev.kind} g${ev.gain}`); break;
+        case 'waiting_user': this.autoChar.waitingUser = true; p.phase = 'waiting for lens cap'; break;
+        case 'error': p.error = ev.error; this.finishAutoChar(false); break;
+        case 'cancelled': p.cancelled = true; break;
+        case 'done':
+          p.reused = ev.reused || []; p.captured = ev.captured || p.captured; p.swept = ev.swept || [];
+          p.cancelled = ev.cancelled; this.finishAutoChar(ev.ok);
+          break;
+      }
+    },
+
+    finishAutoChar(ok) {
+      const p = this.autoChar.prog;
+      p.done = true; p.ok = ok; p.phase = '';
+      this.autoChar.running = false; this.autoChar.waitingUser = false;
+      if (this.autoChar.source) { this.autoChar.source.close(); this.autoChar.source = null; }
+      this.load();          // refresh the datasheet with the merged results
+      this.loadDevices();   // the cycle left the lightbox off; resync
+    },
+
+    async autoCharContinue() {
+      this.autoChar.waitingUser = false;
+      try { await fetch(`/projects/${this.project}/auto-characterise/continue`, { method: 'POST' }); }
+      catch (e) { /* progress surfaces through the stream */ }
+    },
+
+    async autoCharCancel() {
+      this.autoChar.prog.cancelling = true;
+      try { await fetch(`/projects/${this.project}/auto-characterise/cancel`, { method: 'POST' }); }
+      catch (e) { /* progress surfaces through the stream */ }
+    },
 
     async load() {
       try {
