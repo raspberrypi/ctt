@@ -3,11 +3,12 @@
 {% block body %}
 {% set active_tab = 'run' %}
 {% include '_project_tabs.html' %}
-<p class="muted" style="margin:-12px 0 20px">{{ counts.macbeth }} Macbeth · {{ counts.alsc }} ALSC · {{ counts.cac }} CAC · {{ counts.dark }} dark images{% if excluded_count %} · <span style="color:var(--warn)">{{ excluded_count }} excluded</span>{% endif %}</p>
+<p class="runstats"><b>{{ counts.macbeth }}</b> Macbeth · <b>{{ counts.alsc }}</b> ALSC · <b>{{ counts.cac }}</b> CAC · <b>{{ counts.dark }}</b> dark images{% if excluded_count %} · <span style="color:var(--warn)">{{ excluded_count }} excluded</span>{% endif %}</p>
 
 <div class="grid" style="grid-template-columns: 1fr 1fr; align-items: start" x-data='runApp({ project: {{ project.name|tojson }} })'>
+  <div class="grid">
   <div class="card">
-    <div class="card-head"><h2>Options</h2></div>
+    <div class="card-head"><h2>Run</h2></div>
 
     <div class="field">
       <label>Target platform</label>
@@ -30,9 +31,9 @@
     </div>
 
     <label class="check">
-      <input type="checkbox" x-model="update"> Update existing tuning (keep sections not re-calibrated)
+      <input type="checkbox" x-model="update"> Update existing tuning
     </label>
-    <div x-show="update" x-cloak>
+    <div class="subflow" x-show="update" x-cloak>
       <div class="field">
         <label>Existing tuning</label>
         <div class="seg">
@@ -72,9 +73,12 @@
       </div>
       <div class="hint">Only the sections selected by <b>Mode</b> are re-calibrated and replaced; all other sections are preserved from the existing file. In <b>Full</b> mode every section is regenerated (seeded from the existing file).</div>
     </div>
+  </div>
 
-    <div class="divider"></div>
-    <h3>Black level</h3>
+  <div class="card">
+    <div class="card-head"><h2>Stage parameters</h2></div>
+
+    <div class="eyebrow">Black level</div>
     <div class="field">
       <label>Level (-1 = auto)</label>
       <input type="number" x-model.number="blacklevel" min="-1" max="65535" step="1">
@@ -86,7 +90,7 @@
     <!-- AWB & CCM: only when AWB/CCM are calibrated (full or colour-only). -->
     <div x-show="mode==='full' || mode==='colour-only'" x-cloak>
       <div class="divider"></div>
-      <h3>AWB &amp; CCM</h3>
+      <div class="eyebrow">AWB · CCM</div>
 
       <label class="check">
         <input type="checkbox" x-model="greyworld"> Grey-world AWB (instead of Macbeth-based)
@@ -109,7 +113,7 @@
     <!-- ALSC: only when lens shading is calibrated (full or alsc-only). -->
     <div x-show="mode==='full' || mode==='alsc-only'" x-cloak>
       <div class="divider"></div>
-      <h3>ALSC (lens shading)</h3>
+      <div class="eyebrow">ALSC — lens shading</div>
 
       <label class="check">
         <input type="checkbox" x-model="doAlscColour"> ALSC colour shading
@@ -129,7 +133,7 @@
     <!-- Lux: calibrated only in a full run. -->
     <div x-show="mode==='full'" x-cloak>
       <div class="divider"></div>
-      <h3>Lux</h3>
+      <div class="eyebrow">Lux</div>
       <div class="field">
         <label>Reference</label>
         <div class="seg">
@@ -153,6 +157,7 @@
     </div>
 
   </div>
+  </div>
 
   <div class="card">
     <div class="card-head">
@@ -165,7 +170,13 @@
         <button class="btn ghost" x-show="done" @click="window.location='{{ url_for('results_page', name=project.name) }}'">View results &rarr;</button>
       </div>
     </div>
-    <div class="console" id="console" x-ref="console"></div>
+    <div class="console" id="console">
+      <div x-show="!started">
+        <span class="ln cmd" x-text="planLine"></span>
+        <span class="ln dim">Press ▶ Run calibration to start.</span>
+      </div>
+      <div x-ref="console"></div>
+    </div>
   </div>
 </div>
 {% endblock %}
