@@ -17,8 +17,9 @@ pip install "rpi-ctt[devices]"            # from PyPI (or "rpi-ctt[server,device
 pip install -e ".[devices]"               # or ".[server,devices]" with the web UI
 sudo apt install libusb-1.0-0             # pyusb's backend
 
-# allow non-root USB access (lightSTUDIO-S)
+# allow non-root USB access (one rule per device)
 sudo cp devices/lightstudio_s/contrib/99-lightstudio.rules /etc/udev/rules.d/
+sudo cp devices/cl70f/contrib/99-cl70f.rules /etc/udev/rules.d/
 sudo udevadm control --reload && sudo udevadm trigger
 ```
 
@@ -73,9 +74,13 @@ ctt-lightbox off
 | 3  | `D50`        | D50 daylight                    | 100 |
 | 4  | `D65`        | D65 daylight                    | 100 |
 | 5  | `Halogen10`  | Halogen (10 lux)                | 2   |
-| 6  | `Halogen100` | Halogen (100 lux)               | 25  |
-| 7  | `Halogen400` | Halogen (400 lux)               | 100 |
-| 8  | `HalogenBF`  | Halogen + blue filter (400 lux) | 100 |
+| 6  | `Halogen100` | Halogen (100 lux)               | 17  |
+| 7  | `Halogen400` | Halogen (400 lux)               | 67  |
+| 8  | `HalogenBF`  | Halogen + blue filter (400 lux) | 99  |
+
+The default % values are the device's stored power-on levels, reported per channel by
+`Lightbox.info()` as `illuminant_defaults` (and used to prefill the web auto-capture
+dialog); they may vary slightly between units and calibrations.
 
 ## Light meter
 
@@ -104,5 +109,5 @@ ctt-lightmeter sample --interval 5 --count 10
 ctt-lightmeter calibrate                    # run a dark calibration
 ```
 
-Non-root USB access to the CL-70F needs the udev rule from
-`devices/cl70f/contrib/99-cl70f.rules` (install instructions in the file).
+Non-root USB access to the CL-70F needs its udev rule (installed in the
+[Install](#install-on-the-pi) step above; see the file for details).

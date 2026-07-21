@@ -107,6 +107,18 @@ def test_info_snapshot():
     assert info['channel'] == 4
     assert info['illuminant'] == 'D65'
     assert 'intensity' in info and 'model' in info
+    assert info['illuminant_defaults'] == {1: 100.0, 4: 100.0}
+
+
+def test_info_tolerates_default_intensity_failures():
+    class FlakyBox(FakeBox):
+        def _get_default_intensity(self, channel):
+            if channel == 4:
+                raise LightboxError('no default stored')
+            return 75.0
+
+    info = FlakyBox().info()
+    assert info['illuminant_defaults'] == {1: 75.0}  # failing channel omitted, not fatal
 
 
 def test_context_manager_closes():

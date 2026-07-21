@@ -168,6 +168,8 @@ function captureApp(cfg) {
     counts: { macbeth: 0, alsc: 0, cac: 0, dark: 0 },
     form: { image_type: 'macbeth', colour_temp: 6500, lux: 1000, frames: 1 },
     autoTag: false,  // tag capture filenames from the light meter's live reading
+    // Automated capture cycle over the lightbox + light meter (needs both devices).
+    auto: { open: false, running: false, waitingUser: false, lamps: [], frames: 3, darks: true, adjust: true, prog: null, source: null },
     controls: { exposure: 10000, gain: 1.0, auto_exposure: true, colour_temp: 0, lux: 0, ev: 0 },
     fpsTarget: 30,  // framerate target; 0 = unconstrained (variable frame duration)
     camera: { model: '', resolution: null },
@@ -310,6 +312,138 @@ function captureApp(cfg) {
       if (!r) return;
       this.form.colour_temp = Math.round(r.cct);
       this.form.lux = Math.round(r.illuminance_lux);
+    },
+
+    // --- auto-capture cycle ------------------------------------------------
+    autoAvailable() {
+      return this.connected && this.lightbox.present && this.lightmeter.present;
+    },
+
+    openAutoCapture() {
+      const labels = this.lightbox.illuminant_labels || {};
+      const defaults = this.lightbox.illuminant_defaults || {};
+      this.auto.lamps = Object.entries(this.lightbox.illuminants || {}).map(([ch, name]) => ({
+        channel: Number(ch), illuminant: name, label: labels[ch] || name,
+        selected: true, percent: Math.round(defaults[ch] ?? 100),
+      }));
+      this.auto.frames = this.form.frames || 3;
+      this.auto.open = true;
+    },
+
+    startAutoCapture() {
+      const lamps = this.auto.lamps.filter((l) => l.selected);
+      if (!lamps.length) return;
+      this.auto.open = false;
+      this.auto.running = true;
+      this.auto.waitingUser = false;
+      this.auto.prog = {
+        index: 0, total: lamps.length, current: null, phase: '', reading: null,
+        stableCount: 0, needed: 10, lamps: lamps.map((l) => l.illuminant), lampStates: {}, darkState: 'pending',
+        adjustNote: '', errors: [], warnings: [], done: false, ok: null, cancelled: false, cancelling: false,
+      };
+      for (const l of lamps) this.auto.prog.lampStates[l.illuminant] = 'pending';
+      // The cycle owns the meter while it runs; pause the card's auto-refresh.
+      this._lmAutoSaved = this.lightmeter.auto;
+      this.lightmeter.auto = false;
+      const params = new URLSearchParams({
+        lamps: lamps.map((l) => `${l.illuminant}:${l.percent}`).join(','),
+        frames: this.auto.frames, darks: this.auto.darks ? '1' : '0', adjust: this.auto.adjust ? '1' : '0',
+      });
+      this.auto.source = new EventSource(`/projects/${this.project}/auto-capture/stream?${params}`);
+      this.auto.source.onmessage = (e) => this.autoEvent(JSON.parse(e.data));
+      this.auto.source.onerror = () => {
+        if (this.auto.running) {
+          this.auto.prog.errors.push('stream interrupted');
+          this.finishAuto(false);
+        }
+      };
+    },
+
+    autoEvent(ev) {
+      const p = this.auto.prog;
+      switch (ev.event) {
+        case 'lamp_start':
+          p.index = ev.index; p.total = ev.total; p.current = ev.illuminant;
+          p.phase = 'stabilising'; p.reading = null; p.stableCount = 0; p.adjustNote = '';
+          p.lampStates[ev.illuminant] = 'active';
+          break;
+        case 'frame_check':
+          if (ev.found && !ev.saturated) p.adjustNote = '';
+          else p.adjustNote = ev.found ? 'chart over-exposed' : 'chart not found';
+          break;
+        case 'adjust':
+          p.adjustNote = (ev.reason === 'saturated' ? 'lowering' : 'raising')
+            + ` intensity to ${ev.percent}%`;
+          p.phase = 'stabilising'; p.reading = null; p.stableCount = 0;
+          break;
+        case 'reading':
+          p.reading = ev; p.stableCount = ev.stable_count; p.needed = ev.needed;
+          break;
+        case 'stabilise_timeout':
+          p.warnings.push(`${ev.illuminant}: meter did not stabilise; captured anyway`);
+          p.lampStates[ev.illuminant] = 'warn';
+          break;
+        case 'capturing':
+          p.phase = 'capturing'; p.current = ev.illuminant;  // null = dark frames
+          break;
+        case 'captured':
+          // Same merge as a manual capture: replace on overwrite, else add on top.
+          for (const entry of (ev.added || [])) {
+            entry.jpeg = entry.jpeg || 'saved';
+            const idx = this.captures.findIndex((c) => c.filename === entry.filename);
+            if (idx >= 0) this.captures.splice(idx, 1, entry);
+            else this.captures.unshift(entry);
+          }
+          if (ev.illuminant === null) p.darkState = 'done';  // the dark burst
+          this.updateCounts();
+          break;
+        case 'lamp_done':
+          if (p.lampStates[ev.illuminant] !== 'warn') p.lampStates[ev.illuminant] = 'done';
+          p.phase = '';
+          break;
+        case 'lamp_error':
+          p.lampStates[ev.illuminant] = 'error';
+          p.errors.push(`${ev.illuminant}: ${ev.error}`);
+          p.phase = '';
+          break;
+        case 'waiting_user':
+          this.auto.waitingUser = true; p.phase = 'waiting'; p.darkState = 'active';
+          break;
+        case 'cancelled':
+          p.cancelled = true;
+          break;
+        case 'error':
+          p.errors.push(ev.error);
+          this.finishAuto(false);
+          break;
+        case 'done':
+          if (ev.warnings && ev.warnings.length) p.warnings = ev.warnings;
+          p.cancelled = ev.cancelled;
+          this.finishAuto(ev.ok);
+          break;
+      }
+    },
+
+    finishAuto(ok) {
+      const p = this.auto.prog;
+      p.done = true; p.ok = ok; p.phase = '';
+      this.auto.running = false;
+      this.auto.waitingUser = false;
+      if (this.auto.source) { this.auto.source.close(); this.auto.source = null; }
+      if (this._lmAutoSaved !== undefined) { this.lightmeter.auto = this._lmAutoSaved; this._lmAutoSaved = undefined; }
+      this.loadLightbox();  // resync the card with wherever the cycle left the box
+    },
+
+    async autoContinue() {
+      this.auto.waitingUser = false;
+      try { await fetch(`/projects/${this.project}/auto-capture/continue`, { method: 'POST' }); }
+      catch (e) { /* progress and errors surface through the stream */ }
+    },
+
+    async autoCancel() {
+      this.auto.prog.cancelling = true;
+      try { await fetch(`/projects/${this.project}/auto-capture/cancel`, { method: 'POST' }); }
+      catch (e) { /* progress and errors surface through the stream */ }
     },
 
     updateCounts() {

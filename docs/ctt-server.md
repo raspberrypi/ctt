@@ -60,6 +60,27 @@ When a supported lightbox is attached (see [Device control](device-control.md)),
 the capture page shows a **Lightbox** control to pick the illuminant and set
 intensity; it is hidden when no device is present.
 
+When a supported light meter is attached, the page shows a **Light meter** card
+with the live reading (illuminance, colour temperature, Δuv, CIE x/y, CRI Ra),
+refreshed automatically while the tab is visible (toggle with **Auto**, or read
+once with **Sample**). Ticking **Auto-tag** fills the capture's colour-temperature
+and lux tags from the latest measured reading. Every capture taken while a meter
+is present also records the measured reading in the project alongside the image
+(shown as a *measured* chip on the Images tab), independent of the filename tags.
+The card and Auto-tag are hidden when no meter is present.
+
+#### Auto-capture (lightbox + light meter)
+
+With **both** a lightbox and a light meter attached, Macbeth captures gain an
+**Auto-capture…** button that runs the whole cycle unattended: pick the lamps to
+calibrate (each with its own intensity), and for every lamp the server switches the
+lightbox, waits for the meter to stabilise, optionally nudges the intensity so the
+Macbeth chart is framed and not over-exposed, then captures a Macbeth burst tagged
+from the measured reading. With **dark frames** enabled it finishes by turning the
+lightbox off and pausing for you to fit the lens cap. A progress popup shows each
+lamp's status and live readings, with **Cancel**; per-lamp failures are reported and
+skipped, and the button is hidden unless the camera and both devices are present.
+
 #### Macbeth (needs colour temperature + lux)
 
 Images of a Macbeth ColorChecker chart, used for AWB, CCM, noise, lux and GEQ.
@@ -200,8 +221,8 @@ vertical/horizontal.
 The web UI is driven by a JSON-over-HTTPS API on the same port, which can also
 be scripted directly (e.g. to automate captures). It is unauthenticated and
 unversioned — treat it as internal and subject to change. Errors are returned
-as JSON `{"error": "..."}` with a 4xx status, or 503 when the camera (or
-lightbox) is not available.
+as JSON `{"error": "..."}` with a 4xx status, or 503 when the camera, lightbox
+or light meter is not available.
 
 ### Camera (shared live camera)
 
@@ -220,8 +241,23 @@ lightbox) is not available.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/lightbox` | Status: presence, model, illuminants, current channel/intensity |
+| GET | `/api/lightbox` | Status: presence, model, illuminants, illuminant labels/temps/defaults, current channel/intensity |
 | POST | `/api/lightbox` | One of `{"off": true}`, `{"illuminant": "D65", "percent": 50}`, `{"channel": 4, "percent": 50}` or `{"percent": 50}` (current channel) |
+
+### Light meter
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/lightmeter` | Read-only status: `{"present": bool, ...model/serial}` (takes no measurement) |
+| POST | `/api/lightmeter` | `{"action": "sample"}` — take one measurement; returns identity plus `reading` (the full `Measurement.to_dict()`) |
+
+### Auto-capture (needs a lightbox and a light meter)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/projects/<name>/auto-capture/stream` | Run the cycle, streaming progress as Server-Sent Events. Query: `lamps=D65:100,F12:80` (name:percent, percent optional), `frames=1-16`, `darks=1`, `adjust=1`. Each `data:` line is a JSON event; the terminal event is `done` (or `error`) |
+| POST | `/projects/<name>/auto-capture/continue` | Release a cycle paused at the lens-cap prompt (409 if none is waiting) |
+| POST | `/projects/<name>/auto-capture/cancel` | Stop the running cycle (409 if none is running) |
 
 ### Projects and captures
 
@@ -229,7 +265,7 @@ lightbox) is not available.
 |--------|------|-------------|
 | POST | `/projects` | Create a project (form field `name`) |
 | POST | `/projects/<name>/delete` | Delete a project and all its files |
-| POST | `/projects/<name>/capture` | Capture a still: `{"image_type": "macbeth"\|"alsc"\|"cac"\|"dark", "colour_temp": K, "lux": n, "label": s, "frames": 1-16}`; bursts save as indexed files |
+| POST | `/projects/<name>/capture` | Capture a still: `{"image_type": "macbeth"\|"alsc"\|"cac"\|"dark", "colour_temp": K, "lux": n, "label": s, "frames": 1-16}`; bursts save as indexed files. A light-meter reading (if present) is recorded with each capture |
 | POST | `/projects/<name>/upload` | Import files (multipart `files`), auto-tagged from their CTT-format names; returns `added` and `skipped` |
 | POST | `/projects/<name>/captures/<file>/delete` | Delete a capture |
 | POST | `/projects/<name>/captures/<file>/exclude` | `{"excluded": bool}` — exclude from runs without deleting |

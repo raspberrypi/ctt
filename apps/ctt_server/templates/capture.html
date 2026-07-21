@@ -203,14 +203,17 @@
           <input type="checkbox" style="width:auto" x-model="autoTag" @change="autoTag && tagFromMeter()"> Auto-tag
         </label>
       </div>
-      <div class="field" style="flex:1 0 100px; margin:0">
+      <div class="field" style="flex:0 0 110px; margin:0">
         <label title="Frames captured per shot, saved as indexed files; CTT averages each burst internally">Burst</label>
         <input type="number" x-model.number="form.frames" min="1" max="16" step="1">
       </div>
       <div class="field" style="flex:0 0 auto; margin:0">
-        <button class="btn primary" :disabled="!connected || busy" @click="capture()">
+        <button class="btn primary" :disabled="!connected || busy || auto.running" @click="capture()">
           <span x-text="busy ? 'Capturing…' : '● Capture'"></span>
         </button>
+      </div>
+      <div class="field" style="flex:0 0 auto; margin:0" x-show="autoAvailable() && form.image_type === 'macbeth'" x-cloak>
+        <button class="btn" :disabled="busy || auto.running" @click="openAutoCapture()">Auto-capture…</button>
       </div>
     </div>
     <div class="hint mt">
@@ -245,6 +248,98 @@
         </li>
       </template>
     </ul>
+  </div>
+
+  <!-- Auto-capture: configuration dialog -->
+  <div class="viewer-backdrop" x-show="auto.open" x-cloak @click.self="auto.open=false">
+    <div class="exif-box card">
+      <div class="card-head"><h2>Auto-capture</h2></div>
+      <p class="hint">Cycles the lightbox through the selected lamps, waits for the light meter to
+        stabilise after each switch, and captures a Macbeth burst per lamp tagged from the measured
+        reading.</p>
+      <template x-for="lamp in auto.lamps" :key="lamp.channel">
+        <div class="auto-lamp-row">
+          <label style="display:inline-flex; align-items:center; gap:8px; margin:0; flex:1">
+            <input type="checkbox" style="width:auto" x-model="lamp.selected">
+            <span x-text="lamp.channel + ' — ' + lamp.label"></span>
+          </label>
+          <input type="number" min="0" max="100" step="1" style="width:80px"
+                 x-model.number="lamp.percent" :disabled="!lamp.selected"> %
+        </div>
+      </template>
+      <div class="field-row mt" style="align-items:flex-end; flex-wrap:wrap">
+        <div class="field" style="flex:0 0 100px; margin:0">
+          <label>Burst</label>
+          <input type="number" min="1" max="16" step="1" x-model.number="auto.frames">
+        </div>
+        <label style="display:inline-flex; align-items:center; gap:6px; margin:0">
+          <input type="checkbox" style="width:auto" x-model="auto.darks">
+          Dark frames at the end (pauses for the lens cap)
+        </label>
+        <label style="display:inline-flex; align-items:center; gap:6px; margin:0"
+               title="Before each lamp, adjust its intensity so the Macbeth chart is framed and not clipped">
+          <input type="checkbox" style="width:auto" x-model="auto.adjust">
+          Adjust light for the chart
+        </label>
+        <div class="field" style="flex:0 0 auto; margin:0 0 0 auto">
+          <button class="btn" @click="auto.open=false">Cancel</button>
+          <button class="btn primary" :disabled="!auto.lamps.some(l => l.selected)"
+                  @click="startAutoCapture()">Start</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auto-capture: progress popup (not dismissable while running) -->
+  <div class="viewer-backdrop" x-show="auto.running || (auto.prog && auto.prog.done)" x-cloak>
+    <div class="exif-box card" x-show="auto.prog">
+      <div class="card-head">
+        <h2>Auto-capture</h2>
+        <span class="chip" x-show="auto.running" x-text="auto.prog && (auto.prog.index + '/' + auto.prog.total)"></span>
+        <span class="chip cac" x-show="auto.prog && auto.prog.done && auto.prog.ok">complete</span>
+        <span class="chip warn" x-show="auto.prog && auto.prog.done && auto.prog.cancelled">cancelled</span>
+        <span class="chip bad" x-show="auto.prog && auto.prog.done && !auto.prog.ok && !auto.prog.cancelled">failed</span>
+      </div>
+      <ul class="auto-lamps" x-show="auto.prog">
+        <template x-for="name in auto.prog ? auto.prog.lamps : []" :key="name">
+          <li>
+            <span class="state" :class="auto.prog.lampStates[name]"
+                  x-text="{pending: '·', active: '●', done: '✓', warn: '!', error: '✗'}[auto.prog.lampStates[name]]"></span>
+            <span x-text="name" style="flex:1"></span>
+            <span class="hint" style="margin:0"
+                  x-show="auto.prog.current === name && auto.prog.phase === 'stabilising' && auto.prog.reading"
+                  x-text="auto.prog.reading ? (auto.prog.reading.lux.toFixed(0) + ' lx · '
+                          + auto.prog.reading.cct.toFixed(0) + ' K — stable '
+                          + auto.prog.stableCount + '/' + auto.prog.needed) : ''"></span>
+            <span class="hint" style="margin:0; color:var(--warn)"
+                  x-show="auto.prog.current === name && auto.prog.adjustNote"
+                  x-text="auto.prog.adjustNote"></span>
+            <span class="hint" style="margin:0"
+                  x-show="auto.prog.current === name && auto.prog.phase === 'capturing'">capturing…</span>
+          </li>
+        </template>
+        <li x-show="auto.darks">
+          <span class="state" :class="auto.prog && auto.prog.darkState"
+                x-text="auto.prog && {pending: '·', active: '●', done: '✓'}[auto.prog.darkState]"></span>
+          <span style="flex:1">Dark frames</span>
+          <span class="hint" style="margin:0"
+                x-show="auto.prog && auto.prog.current === null && auto.prog.phase === 'capturing'">capturing…</span>
+        </li>
+      </ul>
+      <div class="banner info mt" x-show="auto.waitingUser">
+        Fit the lens cap, then press
+        <button class="btn primary" @click="autoContinue()">Continue</button>
+      </div>
+      <div class="banner error mt" x-show="auto.prog && auto.prog.errors.length"
+           x-text="auto.prog && auto.prog.errors.join('; ')"></div>
+      <div class="banner warn mt" x-show="auto.prog && auto.prog.warnings.length"
+           x-text="auto.prog && auto.prog.warnings.join('; ')"></div>
+      <div class="mt" style="text-align:right">
+        <button class="btn" x-show="auto.running" :disabled="auto.prog && auto.prog.cancelling"
+                @click="autoCancel()" x-text="auto.prog && auto.prog.cancelling ? 'Cancelling…' : 'Cancel'"></button>
+        <button class="btn" x-show="auto.prog && auto.prog.done" @click="auto.prog = null">Close</button>
+      </div>
+    </div>
   </div>
 
 </div>

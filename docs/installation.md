@@ -30,8 +30,8 @@ Optional extras enable the additional components:
 | Extra | Installs | Use for |
 |-------|----------|---------|
 | `rpi-ctt[server]` | Flask | The [CTT server](ctt-server.md) web UI (run on the Pi) |
-| `rpi-ctt[devices]` | pyusb | [USB lightbox control](device-control.md) |
-| `rpi-ctt[server,devices]` | both | Web UI with lightbox support |
+| `rpi-ctt[devices]` | pyusb | [USB lightbox and light-meter control](device-control.md) |
+| `rpi-ctt[server,devices]` | both | Web UI with lightbox and light-meter support |
 
 ## From a local checkout
 
@@ -40,7 +40,7 @@ For development, install in editable mode from the repository root:
 ```bash
 pip install -e .                    # core CLI only
 pip install -e ".[server]"          # with the web UI
-pip install -e ".[server,devices]"  # with the web UI and lightbox control
+pip install -e ".[server,devices]"  # with the web UI and lightbox/light-meter control
 ```
 
 See [Developers](developers.md) for the `dev` and `test` extras (pre-commit
@@ -52,5 +52,5 @@ hooks and pytest).
   and is imported lazily, so it is intentionally not a pip dependency. If you
   use a virtualenv, create it with `--system-site-packages` (or
   `apt install python3-picamera2`) so picamera2 is visible.
-- **Lightbox control** additionally needs the libusb backend and a udev rule —
-  see [Device control](device-control.md#install-on-the-pi).
+- **Lightbox and light-meter control** additionally need the libusb backend and a
+  udev rule — see [Device control](device-control.md#install-on-the-pi).
