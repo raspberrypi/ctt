@@ -32,7 +32,7 @@ from flask import (
 
 from devices import LightboxError, LightmeterError, get_shared_lightbox, get_shared_lightmeter
 
-from . import auto_capture, characterise, colour_check, ctt_runner, mtf, results
+from . import auto_capture, auto_characterise, characterise, colour_check, ctt_runner, mtf, results
 from .camera import (
     MJPEG_CONTENT_TYPE,
     CameraError,
@@ -1019,6 +1019,75 @@ def create_app(workspace_root: str | None = None) -> Flask:
             mimetype='text/event-stream',
             headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
         )
+
+    @app.route('/projects/<name>/auto-characterise/stream')
+    def auto_characterise_stream(name: str):
+        """Run the gap-driven auto-characterise cycle, streaming progress as SSE.
+
+        Validation and missing-device failures are streamed as an error event rather
+        than returned as a 4xx (EventSource cannot read error bodies).
+        """
+        proj = get_project_or_404(name)
+
+        def error_events(message: str):
+            return iter([{'event': 'error', 'error': message}, {'event': 'done', 'ok': False, 'cancelled': False}])
+
+        try:
+            gains = [float(g) for g in request.args.get('gains', '1').split(',') if g.strip()]
+        except ValueError:
+            return sse_response(error_events('invalid gains'))
+        if not gains:
+            return sse_response(error_events('no gains selected'))
+        lamp = request.args.get('lamp', '').strip()
+        if not lamp:
+            return sse_response(error_events('no lamp selected'))
+        intensity = request.args.get('intensity')
+
+        def flag(key: str) -> bool:
+            return request.args.get(key, '1') in ('1', 'true', 'yes')
+
+        box = lightbox_or_none()
+        if box is None:
+            return sse_response(error_events('No lightbox detected'))
+        meter = lightmeter_or_none()
+        if meter is None:
+            return sse_response(error_events('No light meter detected'))
+        try:
+            camera = get_shared_camera()
+        except CameraError as err:
+            return sse_response(error_events(str(err)))
+        return sse_response(
+            auto_characterise.run_auto_characterise_stream(
+                proj,
+                camera,
+                box,
+                meter,
+                gains,
+                lamp,
+                intensity=float(intensity) if intensity else None,
+                include_darks=flag('darks'),
+                include_flats=flag('flats'),
+                include_sweep=flag('sweep'),
+                sweep_points=int(request.args.get('sweep_points', 10)),
+                sweep_frames=int(request.args.get('sweep_frames', 8)),
+                dark_frames=int(request.args.get('dark_frames', 16)),
+                flat_frames=int(request.args.get('flat_frames', 16)),
+            )
+        )
+
+    @app.route('/projects/<name>/auto-characterise/continue', methods=['POST'])
+    def auto_characterise_continue(name: str):
+        get_project_or_404(name)
+        if not auto_characterise.request_continue():
+            abort(409, 'No auto-characterise cycle is waiting for the lens cap')
+        return jsonify({'ok': True})
+
+    @app.route('/projects/<name>/auto-characterise/cancel', methods=['POST'])
+    def auto_characterise_cancel(name: str):
+        get_project_or_404(name)
+        if not auto_characterise.request_cancel():
+            abort(409, 'No auto-characterise cycle is running')
+        return jsonify({'ok': True})
 
     @app.route('/projects/<name>/results/data')
     def results_data(name: str):

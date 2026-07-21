@@ -50,6 +50,10 @@
           <span x-text="running ? 'Sweeping…' : '▶ Run sweep'"></span>
         </button>
       </div>
+      <div class="field" style="margin-bottom:0; flex:0 0 auto" x-show="autoCharAvailable()" x-cloak>
+        <label>&nbsp;</label>
+        <button class="btn" :disabled="running || autoChar.running" @click="openAutoChar()">Auto-characterise…</button>
+      </div>
     </div>
     <div class="console" style="height: 180px; margin-top: 14px" x-show="running || consoleUsed" x-cloak>
       <div x-ref="console"></div>
@@ -177,6 +181,74 @@
         </div>
         <div class="hint" x-show="prnu.available" x-cloak>Residual non-uniformity of the time-averaged
           flat field after removing the lens-shading gradient.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auto-characterise: configuration dialog -->
+  <div class="viewer-backdrop" x-show="autoChar.open" x-cloak @click.self="autoChar.open=false">
+    <div class="exif-box card">
+      <div class="card-head"><h2>Auto-characterise</h2></div>
+      <p class="hint">Completes the characterisation with the least work: reuses the captures and results
+        this project already has, and only captures or sweeps what's missing — matched by gain. Uses the
+        gains, points and frames set above.</p>
+      <div class="field">
+        <label>Lamp for the sweep &amp; flat field</label>
+        <select x-model="autoChar.lamp">
+          <template x-for="lamp in autoChar.lamps" :key="lamp.channel">
+            <option :value="lamp.illuminant" x-text="lamp.channel + ' — ' + lamp.label + ' (' + lamp.percent + '%)'"></option>
+          </template>
+        </select>
+        <div class="hint">A bright lamp (e.g. a halogen) so the sweep can reach saturation; the meter confirms it's steady.</div>
+      </div>
+      <div class="field-row" style="align-items:center; flex-wrap:wrap; gap:16px">
+        <label style="display:inline-flex; align-items:center; gap:6px; margin:0">
+          <input type="checkbox" style="width:auto" x-model="autoChar.sweep"> Exposure sweep</label>
+        <label style="display:inline-flex; align-items:center; gap:6px; margin:0">
+          <input type="checkbox" style="width:auto" x-model="autoChar.flats"> Flat field (PRNU)</label>
+        <label style="display:inline-flex; align-items:center; gap:6px; margin:0">
+          <input type="checkbox" style="width:auto" x-model="autoChar.darks"> Dark frames (lens-cap pause)</label>
+        <div class="field" style="flex:0 0 auto; margin:0 0 0 auto">
+          <button class="btn" @click="autoChar.open=false">Cancel</button>
+          <button class="btn primary" :disabled="!autoChar.lamp" @click="startAutoChar()">Start</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auto-characterise: progress popup (not dismissable while running) -->
+  <div class="viewer-backdrop" x-show="autoChar.running || (autoChar.prog && autoChar.prog.done)" x-cloak>
+    <div class="exif-box card" x-show="autoChar.prog">
+      <div class="card-head">
+        <h2>Auto-characterise</h2>
+        <span class="chip cac" x-show="autoChar.prog && autoChar.prog.done && autoChar.prog.ok">complete</span>
+        <span class="chip warn" x-show="autoChar.prog && autoChar.prog.done && autoChar.prog.cancelled">cancelled</span>
+        <span class="chip bad" x-show="autoChar.prog && autoChar.prog.done && !autoChar.prog.ok && !autoChar.prog.cancelled">failed</span>
+      </div>
+      <ul class="auto-lamps" x-show="autoChar.prog && autoChar.prog.plan.length">
+        <template x-for="g in autoChar.prog ? autoChar.prog.plan : []" :key="g.gain">
+          <li>
+            <span x-text="'gain ' + g.gain" style="flex:0 0 80px"></span>
+            <span class="hint" style="margin:0; flex:1"
+                  x-text="'sweep: ' + g.sweep + ' · flats: ' + g.flats + ' · darks: ' + g.darks"></span>
+          </li>
+        </template>
+      </ul>
+      <div class="hint" x-show="autoChar.prog && autoChar.prog.phase" x-text="autoChar.prog && autoChar.prog.phase" style="margin:6px 0"></div>
+      <div class="console" style="height:150px" x-show="autoChar.prog && autoChar.prog.log.length">
+        <template x-for="line in autoChar.prog ? autoChar.prog.log : []" :key="line + Math.random()">
+          <div class="ln" x-text="line"></div>
+        </template>
+      </div>
+      <div class="banner info mt" x-show="autoChar.waitingUser">
+        Fit the lens cap, then press
+        <button class="btn primary" @click="autoCharContinue()">Continue</button>
+      </div>
+      <div class="banner error mt" x-show="autoChar.prog && autoChar.prog.error" x-text="autoChar.prog && autoChar.prog.error"></div>
+      <div class="mt" style="text-align:right">
+        <button class="btn" x-show="autoChar.running" :disabled="autoChar.prog && autoChar.prog.cancelling"
+                @click="autoCharCancel()" x-text="autoChar.prog && autoChar.prog.cancelling ? 'Cancelling…' : 'Cancel'"></button>
+        <button class="btn" x-show="autoChar.prog && autoChar.prog.done" @click="autoChar.prog = null">Close</button>
       </div>
     </div>
   </div>
