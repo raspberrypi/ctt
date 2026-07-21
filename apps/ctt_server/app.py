@@ -32,7 +32,7 @@ from flask import (
 
 from devices import LightboxError, LightmeterError, get_shared_lightbox, get_shared_lightmeter
 
-from . import colour_check, ctt_runner, mtf, results
+from . import auto_capture, colour_check, ctt_runner, mtf, results
 from .camera import (
     MJPEG_CONTENT_TYPE,
     CameraError,
@@ -498,6 +498,74 @@ def create_app(workspace_root: str | None = None) -> Flask:
         except LightmeterError as err:
             return jsonify({'error': str(err)}), 400
         return jsonify({'present': True, **meter.info(), 'reading': reading.to_dict()})
+
+    # --- auto-capture cycle --------------------------------------------------
+    def sse_response(events):
+        """Stream an iterable of event dicts as Server-Sent Events."""
+
+        def generate():
+            for event in events:
+                yield f'data: {json.dumps(event)}\n\n'
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype='text/event-stream',
+            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+        )
+
+    @app.route('/projects/<name>/auto-capture/stream')
+    def auto_capture_stream(name: str):
+        """Run the automated capture cycle, streaming progress as SSE.
+
+        Validation and missing-device failures are streamed as an error event
+        rather than returned as a 4xx: EventSource cannot read error bodies.
+        """
+        proj = get_project_or_404(name)
+
+        def error_events(message: str):
+            return iter(
+                [
+                    {'event': 'error', 'error': message},
+                    {'event': 'done', 'ok': False, 'captured': 0, 'failed': [], 'warnings': [], 'cancelled': False},
+                ]
+            )
+
+        try:
+            lamps = auto_capture.parse_lamps(request.args.get('lamps', ''))
+            frames = max(1, min(int(request.args.get('frames', 3) or 3), 16))
+        except ValueError as err:
+            return sse_response(error_events(str(err)))
+        include_darks = request.args.get('darks') in ('1', 'true', 'yes')
+        adjust = auto_capture.AdjustConfig(enabled=request.args.get('adjust', '1') in ('1', 'true', 'yes'))
+        box = lightbox_or_none()
+        if box is None:
+            return sse_response(error_events('No lightbox detected'))
+        meter = lightmeter_or_none()
+        if meter is None:
+            return sse_response(error_events('No light meter detected'))
+        try:
+            camera = get_shared_camera()
+        except CameraError as err:
+            return sse_response(error_events(str(err)))
+        return sse_response(
+            auto_capture.run_auto_capture_stream(
+                proj, camera, box, meter, lamps, frames=frames, include_darks=include_darks, adjust=adjust
+            )
+        )
+
+    @app.route('/projects/<name>/auto-capture/continue', methods=['POST'])
+    def auto_capture_continue(name: str):
+        get_project_or_404(name)
+        if not auto_capture.request_continue():
+            abort(409, 'No auto-capture cycle is waiting for the lens cap')
+        return jsonify({'ok': True})
+
+    @app.route('/projects/<name>/auto-capture/cancel', methods=['POST'])
+    def auto_capture_cancel(name: str):
+        get_project_or_404(name)
+        if not auto_capture.request_cancel():
+            abort(409, 'No auto-capture cycle is running')
+        return jsonify({'ok': True})
 
     @app.route('/projects/<name>/capture', methods=['POST'])
     def capture(name: str):

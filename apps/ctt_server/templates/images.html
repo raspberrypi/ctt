@@ -41,7 +41,7 @@
                 <div class="fname" x-text="item.key"></div>
                 <div class="meta">
                   <span class="chip" :class="item.items[0].image_type" x-text="item.items[0].image_type"></span>
-                  <span class="chip" x-text="item.items[0].colour_temp + 'K'"></span>
+                  <template x-if="item.items[0].colour_temp != null"><span class="chip" x-text="item.items[0].colour_temp + 'K'"></span></template>
                   <template x-if="item.items[0].lux"><span class="chip" x-text="item.items[0].lux + ' lx'"></span></template>
                   <template x-if="item.items[0].lightmeter">
                     <span class="chip" title="Light-meter reading at capture"
@@ -81,7 +81,7 @@
                 <div class="fname" x-text="item.c.filename"></div>
                 <div class="meta">
                   <span class="chip" :class="item.c.image_type" x-text="item.c.image_type"></span>
-                  <span class="chip" x-text="item.c.colour_temp + 'K'"></span>
+                  <template x-if="item.c.colour_temp != null"><span class="chip" x-text="item.c.colour_temp + 'K'"></span></template>
                   <template x-if="item.c.lux"><span class="chip" x-text="item.c.lux + ' lx'"></span></template>
                   <template x-if="item.c.lightmeter">
                     <span class="chip" title="Light-meter reading at capture"

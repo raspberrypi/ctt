@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from abc import ABC, abstractmethod
 from typing import NamedTuple
@@ -167,6 +168,10 @@ class Lightbox(ABC):
         """The complete status snapshot for UIs/CLIs: identity, capabilities
         (illuminant maps) and live state (active channel + intensity)."""
         state = self.get_state()
+        defaults = {}
+        for channel in self.illuminants:
+            with contextlib.suppress(LightboxError):
+                defaults[channel] = self._get_default_intensity(channel)
         return {
             'model': self.model,
             'serial': self.serial,
@@ -176,6 +181,7 @@ class Lightbox(ABC):
             'illuminants': self.illuminants,
             'illuminant_labels': self.illuminant_labels,
             'illuminant_temps': self.illuminant_temps,
+            'illuminant_defaults': defaults,
         }
 
     def _resolve(self, illuminant: int | str) -> int:
