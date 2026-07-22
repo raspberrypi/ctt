@@ -1660,14 +1660,21 @@ function resultsApp(cfg) {
     ccmHasPatches() { return ((this.metrics && this.metrics.ccm) || []).some((c) => c.patches && c.patches.length); },
     ccmStats() {
       const e = this.ccmEntry();
-      if (!e) return { mean: null, worst: null, colour: null };
+      if (!e) return { mean: null, worst: null, colour: null, flare: null, flarePct: null };
       const de = (e.patches || []).map((p) => p.de);
       const dn = (e.patches || []).map((p) => p.de_norm).filter((v) => v != null);
+      const df = (e.patches || []).map((p) => p.de_flare).filter((v) => v != null);
       const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+      const flarePct = e.flare_pct != null ? e.flare_pct : null;
       if (de.length) {
-        return { mean: avg(de), worst: Math.max(...de), colour: dn.length ? avg(dn) : null };
+        return {
+          mean: avg(de), worst: Math.max(...de),
+          colour: dn.length ? avg(dn) : null,
+          flare: df.length ? avg(df) : null,
+          flarePct,
+        };
       }
-      return { mean: e.metric_after, worst: e.max_after, colour: null };  // legacy fallback
+      return { mean: e.metric_after, worst: e.max_after, colour: null, flare: null, flarePct };  // legacy fallback
     },
     setCcmCt(ct) {
       this.ccmCt = ct;
