@@ -848,6 +848,7 @@ function runApp(cfg) {
     blacklevel: -1,
     matrixSelection: 'average',
     testPatches: '1,2,5,8,9,12,14',
+    flareCompensation: true,
     luxMode: 'single',          // 'single' = anchor on nearest-luxAnchor capture; 'average' = robust average
     luxAnchor: 1000,            // anchor lux for single mode
     luxMethod: 'trimmed-mean',  // robust-average method: 'trimmed-mean' | 'median'
@@ -974,6 +975,7 @@ function runApp(cfg) {
         blacklevel: this.blacklevel,
         matrix_selection: this.matrixSelection,
         test_patches: this.matrixSelection === 'patches' ? this.testPatches : '',
+        flare_compensation: this.flareCompensation ? '1' : '0',
         lux_reference_target: this.luxMode === 'average' ? 0 : (this.luxAnchor || 1000),
         lux_reference_method: this.luxMethod,
       });

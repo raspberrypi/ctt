@@ -825,6 +825,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
             'ccm': {
                 'matrix_selection': request.args.get('matrix_selection', 'average'),
                 'test_patches': [int(p) for p in request.args.get('test_patches', '').split(',') if p.strip()],
+                'flare_compensation': request.args.get('flare_compensation', '1') == '1',
             },
             'lux': {
                 'reference_target': int(request.args.get('lux_reference_target', 1000)),
