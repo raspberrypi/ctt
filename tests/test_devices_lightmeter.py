@@ -61,7 +61,7 @@ def test_measurement_carries_rich_fields():
 
 
 def test_info_snapshot():
-    assert FakeMeter().info() == {'model': 'FakeMeter', 'serial': 'FM-1'}
+    assert FakeMeter().info() == {'model': 'FakeMeter', 'serial': 'FM-1', 'limits': None}
 
 
 def test_default_read_latest_is_none():

@@ -10,31 +10,41 @@ import pytest
 from ctt_server import app as app_module
 from ctt_server.sessions import Workspace
 from devices import LightmeterError, Measurement
-from devices.lightmeter import Spectrum
+from devices.lightmeter import MeasurementLimits, Spectrum
 
 
 class FakeMeter:
     """A stand-in light meter recording what the routes ask of it."""
 
-    def __init__(self, fail: bool = False):
+    LIMITS = MeasurementLimits(1.0, 200_000.0, colour_min_lux=5.0, cct_min=1563.0, cct_max=100_000.0)
+
+    def __init__(self, fail: bool = False, under: bool = False):
         self.fail = fail
+        self.under = under  # return an out-of-range reading
         self.calls = []
         self._latest = None
 
     def info(self):
-        return {'model': 'FakeMeter', 'serial': 'FM-1'}
+        return {'model': 'FakeMeter', 'serial': 'FM-1', 'limits': self.LIMITS.to_dict()}
+
+    @property
+    def limits(self):
+        return self.LIMITS
 
     def measure(self):
         self.calls.append('measure')
         if self.fail:
             raise LightmeterError('measurement failed')
-        self._latest = Measurement(
-            illuminance_lux=234.5,
-            cct=6543.0,
-            duv=0.0021,
-            spectrum_5nm=Spectrum(start_nm=380.0, step_nm=5.0, values=(0.5,) * 81),
-            spectrum_1nm=Spectrum(start_nm=380.0, step_nm=1.0, values=(0.5,) * 401),
-        )
+        if self.under:
+            self._latest = Measurement(illuminance_lux=-100.0, cct=0.0, in_range=False)
+        else:
+            self._latest = Measurement(
+                illuminance_lux=234.5,
+                cct=6543.0,
+                duv=0.0021,
+                spectrum_5nm=Spectrum(start_nm=380.0, step_nm=5.0, values=(0.5,) * 81),
+                spectrum_1nm=Spectrum(start_nm=380.0, step_nm=1.0, values=(0.5,) * 401),
+            )
         return self._latest
 
     def read_latest(self):
@@ -73,6 +83,13 @@ def test_status_absent(client, monkeypatch):
     assert r.get_json() == {'present': False}
 
 
+def test_status_includes_limits(client, monkeypatch):
+    monkeypatch.setattr(app_module, 'get_shared_lightmeter', lambda: FakeMeter())
+    data = client.get('/api/lightmeter').get_json()
+    assert data['limits']['colour_min_lux'] == 5.0
+    assert data['limits']['illuminance_min'] == 1.0
+
+
 def test_post_sample_returns_reading(client, monkeypatch):
     meter = FakeMeter()
     monkeypatch.setattr(app_module, 'get_shared_lightmeter', lambda: meter)
@@ -81,6 +98,18 @@ def test_post_sample_returns_reading(client, monkeypatch):
     assert r.status_code == 200
     assert 'measure' in meter.calls
     assert data['reading']['illuminance_lux'] == 234.5
+    assert data['reading']['in_range'] is True
+    assert data['limits']['colour_min_lux'] == 5.0
+
+
+def test_post_sample_caps_out_of_range(client, monkeypatch):
+    # The API must never emit the device sentinels: illuminance is clamped to the
+    # limit and the (invalid) colour metrics are dropped.
+    monkeypatch.setattr(app_module, 'get_shared_lightmeter', lambda: FakeMeter(under=True))
+    reading = client.post('/api/lightmeter', json={'action': 'sample'}).get_json()['reading']
+    assert reading['in_range'] is False
+    assert reading['illuminance_lux'] == 1.0  # clamped to the min, not -100
+    assert 'cct' not in reading and 'cri_ra' not in reading  # colour dropped
 
 
 def test_post_unknown_action_is_400(client, monkeypatch):
@@ -144,6 +173,14 @@ def test_capture_without_meter_records_none(capture_client, monkeypatch):
 
 def test_capture_survives_a_meter_failure(capture_client, monkeypatch):
     monkeypatch.setattr(app_module, 'get_shared_lightmeter', lambda: FakeMeter(fail=True))
+    r = capture_client.post('/projects/cam/capture', json={'image_type': 'macbeth', 'colour_temp': 5000, 'lux': 800})
+    assert r.status_code == 200
+    assert r.get_json()['added'][0]['lightmeter'] is None
+
+
+def test_capture_ignores_out_of_range_reading(capture_client, monkeypatch):
+    # An under-range reading must not be recorded as if it were a real measurement.
+    monkeypatch.setattr(app_module, 'get_shared_lightmeter', lambda: FakeMeter(under=True))
     r = capture_client.post('/projects/cam/capture', json={'image_type': 'macbeth', 'colour_temp': 5000, 'lux': 800})
     assert r.status_code == 200
     assert r.get_json()['added'][0]['lightmeter'] is None

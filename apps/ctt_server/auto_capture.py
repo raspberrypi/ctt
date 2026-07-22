@@ -105,6 +105,7 @@ class AutoControl:
 class StabiliseResult(NamedTuple):
     reading: Measurement | None  # None: cancelled or the meter kept failing
     timed_out: bool
+    error: str | None = None  # why no reading (meter failure / under range), for the caller
 
 
 def is_running() -> bool:
@@ -214,15 +215,37 @@ def _stabilise(lightmeter, illuminant: str, cfg: StabiliseConfig, cancel: thread
     start = time.monotonic()
     window: list[Measurement] = []
     failures = 0
+    last_error = 'no usable light-meter reading'
     while not cancel.is_set():
         tick = time.monotonic()
         try:
             reading = lightmeter.measure()
         except LightmeterError as err:
             failures += 1
+            last_error = 'light-meter read failed'
             logger.warning('auto-capture: meter reading failed (%d/%d): %s', failures, cfg.max_read_failures, err)
             if failures >= cfg.max_read_failures:
+                return StabiliseResult(None, False, last_error)
+            if cancel.wait(max(0.0, cfg.sample_interval_s - (time.monotonic() - tick))):
                 return StabiliseResult(None, False)
+            continue
+        # An out-of-range reading is not a measurement; treat it like a read failure
+        # (a persistently dark scene fails the step with a clear "add light" message).
+        if not reading.in_range:
+            failures += 1
+            last_error = 'light is below the meter’s measurable range — add more light'
+            yield {
+                'event': 'reading',
+                'illuminant': illuminant,
+                'lux': reading.illuminance_lux,
+                'cct': reading.cct,
+                'stable_count': 0,
+                'needed': cfg.window,
+                'elapsed_s': round(time.monotonic() - start, 1),
+                'in_range': False,
+            }
+            if failures >= cfg.max_read_failures:
+                return StabiliseResult(None, False, last_error)
             if cancel.wait(max(0.0, cfg.sample_interval_s - (time.monotonic() - tick))):
                 return StabiliseResult(None, False)
             continue
@@ -240,6 +263,7 @@ def _stabilise(lightmeter, illuminant: str, cfg: StabiliseConfig, cancel: thread
             'stable_count': stable,
             'needed': cfg.window,
             'elapsed_s': round(elapsed, 1),
+            'in_range': True,
         }
         if len(window) == cfg.window and stable == cfg.window:
             yield {
@@ -315,7 +339,7 @@ def _capture_lamp(project, camera, lightbox, lightmeter, lamp, frames, cfg, adju
         if control.cancel.is_set():
             return LampOutcome(cancelled=True)
         if result.reading is None:
-            return LampOutcome(error='no usable light-meter reading')
+            return LampOutcome(error=result.error or 'no usable light-meter reading')
         reading_obj = result.reading
         if result.timed_out:
             warnings.append(f'{lamp.illuminant}: meter did not stabilise within {cfg.timeout_s:.0f} s')

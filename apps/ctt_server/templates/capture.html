@@ -146,23 +146,28 @@
     <div class="field-row" style="align-items:flex-end; flex-wrap:wrap; gap:18px">
       <div class="field" style="flex:1 0 auto; margin:0">
         <label>Illuminance</label>
-        <div x-text="lightmeter.reading ? lightmeter.reading.illuminance_lux.toFixed(1) + ' lx' : '—'"></div>
+        <div :class="{'value-bad': lightmeter.reading && !lightmeter.reading.in_range}"
+             x-text="meterIlluminanceText()"></div>
       </div>
       <div class="field" style="flex:1 0 auto; margin:0">
         <label>Colour temp.</label>
-        <div x-text="lightmeter.reading ? lightmeter.reading.cct.toFixed(0) + ' K' : '—'"></div>
+        <div :class="{'value-bad': meterColourUnderRange()}"
+             x-text="lightmeter.reading && lightmeter.reading.cct != null ? lightmeter.reading.cct.toFixed(0) + ' K' : '—'"></div>
       </div>
       <div class="field" style="flex:1 0 auto; margin:0">
         <label>Δuv</label>
-        <div x-text="lightmeter.reading && lightmeter.reading.duv != null ? (lightmeter.reading.duv >= 0 ? '+' : '') + lightmeter.reading.duv.toFixed(4) : '—'"></div>
+        <div :class="{'value-bad': meterColourUnderRange()}"
+             x-text="lightmeter.reading && lightmeter.reading.duv != null ? (lightmeter.reading.duv >= 0 ? '+' : '') + lightmeter.reading.duv.toFixed(4) : '—'"></div>
       </div>
       <div class="field" style="flex:1 0 auto; margin:0">
         <label>CIE x, y</label>
-        <div x-text="lightmeter.reading && lightmeter.reading.cie1931_xy ? lightmeter.reading.cie1931_xy[0].toFixed(4) + ', ' + lightmeter.reading.cie1931_xy[1].toFixed(4) : '—'"></div>
+        <div :class="{'value-bad': meterColourUnderRange()}"
+             x-text="lightmeter.reading && lightmeter.reading.cie1931_xy ? lightmeter.reading.cie1931_xy[0].toFixed(4) + ', ' + lightmeter.reading.cie1931_xy[1].toFixed(4) : '—'"></div>
       </div>
       <div class="field" style="flex:1 0 auto; margin:0">
         <label>Ra</label>
-        <div x-text="lightmeter.reading && lightmeter.reading.cri_ra != null ? lightmeter.reading.cri_ra.toFixed(1) : '—'"></div>
+        <div :class="{'value-bad': meterColourUnderRange()}"
+             x-text="lightmeter.reading && lightmeter.reading.cri_ra != null ? lightmeter.reading.cri_ra.toFixed(1) : '—'"></div>
       </div>
       <div class="field" style="flex:0 0 auto; margin:0 0 0 auto; display:flex; align-items:center; gap:12px">
         <button type="button" class="btn" @click="sampleLightmeter()" :disabled="lightmeter.busy">Sample</button>
@@ -171,6 +176,9 @@
         </label>
         <span class="hint" style="margin:0" x-show="lightmeter.updated" x-cloak x-text="'as of ' + lightmeter.updated"></span>
       </div>
+    </div>
+    <div class="banner error mt" style="margin-bottom:0" x-show="meterColourUnderRange()" x-cloak>
+      Under range — outside the meter's measurable range (illuminance needs ≥ 1 lx, colour ≥ 5 lx); those values are capped or hidden. Add more light.
     </div>
   </div>
 

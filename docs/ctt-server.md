@@ -248,8 +248,13 @@ or light meter is not available.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/lightmeter` | Read-only status: `{"present": bool, ...model/serial}` (takes no measurement) |
-| POST | `/api/lightmeter` | `{"action": "sample"}` — take one measurement; returns identity plus `reading` (the full `Measurement.to_dict()`) |
+| GET | `/api/lightmeter` | Read-only status: `{"present": bool, ...model/serial, "limits": {...}}` (takes no measurement). `limits` gives the meter's valid range (`illuminance_min`/`max`, `colour_min_lux`, `cct_min`/`max`) or `null` |
+| POST | `/api/lightmeter` | `{"action": "sample"}` — take one measurement; returns identity, `limits`, and `reading` (the full `Measurement.to_dict()`, including `in_range`). The reading is capped to the limits: `in_range` is `false` out of range, illuminance is clamped to the nearest bound (never the device sentinel like `-100 lx`), and colour metrics are omitted when there is less than `colour_min_lux` of light |
+
+A reading taken while out of range is never recorded with a capture (the capture stores
+no `lightmeter` metadata), and the automated flows reject it (see Auto-capture /
+Auto-characterise): stabilisation fails the step with an "add light" message rather than
+tagging or sweeping against a bad reading. The web UI shows out-of-range values in red.
 
 ### Auto-capture (needs a lightbox and a light meter)
 

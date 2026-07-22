@@ -14,11 +14,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import threading
 import time
 
-from ..lightmeter import LightMeter, LightmeterError, LightmeterTimeout, Measurement
+from ..lightmeter import LightMeter, LightmeterError, LightmeterTimeout, Measurement, MeasurementLimits
 from . import protocol
 from .transport import Transport, open_transport
 
@@ -42,6 +43,17 @@ class CL70F(LightMeter):
     # A measurement completes asynchronously; poll ST until the busy bit clears.
     _MEASURE_TIMEOUT_S = 30.0
     _POLL_INTERVAL_S = 0.2
+
+    # Rated measurement range (CL-70F spec): illuminance 1–200,000 lx, colour needs
+    # >= 5 lx, CCT 1,563–100,000 K. Below range the meter returns sentinel values
+    # (e.g. -100 lx), which we flag rather than trust.
+    LIMITS = MeasurementLimits(
+        illuminance_min=1.0,
+        illuminance_max=200_000.0,
+        colour_min_lux=5.0,
+        cct_min=1563.0,
+        cct_max=100_000.0,
+    )
 
     def __init__(self, transport: Transport) -> None:
         self._transport = transport
@@ -69,6 +81,10 @@ class CL70F(LightMeter):
     @property
     def serial(self) -> str | None:
         return self._serial
+
+    @property
+    def limits(self) -> MeasurementLimits:
+        return self.LIMITS
 
     # --- measurement -------------------------------------------------------
     def measure(self) -> Measurement:
@@ -162,11 +178,18 @@ class CL70F(LightMeter):
         self._transact_locked('RT', '1', timeout_ms=self._DATA_TIMEOUT_MS)
 
     def _read_result_locked(self) -> Measurement:
-        """Read and decode the latest measurement (NR). Raises _NoResult if empty."""
+        """Read and decode the latest measurement (NR). Raises _NoResult if empty.
+
+        Flags the reading out of range (in_range False) when its illuminance falls
+        outside the meter's rated limits — below range the device fills the fields
+        with sentinels (e.g. -100 lx), which are not a real measurement.
+        """
         resp = self._transact_locked('NR', timeout_ms=self._DATA_TIMEOUT_MS)
         if not resp.red:
             raise _NoResult
-        return protocol.decode_nr(resp.red)
+        m = protocol.decode_nr(resp.red)
+        in_range = self.LIMITS.illuminance_min <= m.illuminance_lux <= self.LIMITS.illuminance_max
+        return dataclasses.replace(m, in_range=in_range)
 
     def _poll_idle_locked(self) -> None:
         """Poll status (ST) until the busy bit clears, raising on an error state."""

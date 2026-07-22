@@ -23,6 +23,25 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class MeasurementLimits:
+    """The range over which a meter's readings are valid.
+
+    Illuminance below `illuminance_min` (or above `illuminance_max`) is out of range;
+    colour metrics (CCT, CRI, chromaticity) additionally need at least `colour_min_lux`
+    to be meaningful. Kept device-independent so any driver can declare its own.
+    """
+
+    illuminance_min: float
+    illuminance_max: float
+    colour_min_lux: float
+    cct_min: float
+    cct_max: float
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Spectrum:
     """A spectral power distribution sampled on a regular wavelength grid.
 
@@ -67,6 +86,11 @@ class Measurement:
     spectrum_5nm: Spectrum | None = None  # 380–780 nm, 5 nm pitch
     spectrum_1nm: Spectrum | None = None  # 380–780 nm, 1 nm pitch
 
+    # False when the illuminance is outside the meter's measurable range (see
+    # LightMeter.limits): the returned values are the device's under/over-range
+    # sentinels, not a real measurement, and must not be trusted.
+    in_range: bool = True
+
     def to_dict(self) -> dict:
         """A JSON-friendly dict, dropping None fields so the payload stays compact."""
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -96,6 +120,15 @@ class LightMeter(ABC):
 
     @property
     def serial(self) -> str | None:
+        return None
+
+    @property
+    def limits(self) -> MeasurementLimits | None:
+        """The meter's valid measurement range, or None if it declares none.
+
+        Drivers that know their range override this; a reading whose illuminance
+        falls outside it is returned with `Measurement.in_range` False.
+        """
         return None
 
     # --- discovery ---------------------------------------------------------
@@ -132,6 +165,7 @@ class LightMeter(ABC):
         return {
             'model': self.model,
             'serial': self.serial,
+            'limits': self.limits.to_dict() if self.limits else None,
         }
 
     # --- context manager ---------------------------------------------------
