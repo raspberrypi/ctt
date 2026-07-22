@@ -42,16 +42,16 @@ device's power-on default).
 from devices import get_lightbox
 from devices.lightstudio_s import Illuminant
 
-with get_lightbox() as box:               # first attached, supported lightbox
-    box.set_illuminant('D65')             # switch to D65 at its default intensity
-    box.set_illuminant('D65', 50)         # ... at 50 %
+with get_lightbox() as box:  # first attached, supported lightbox
+    box.set_illuminant('D65')  # switch to D65 at its default intensity
+    box.set_illuminant('D65', 50)  # ... at 50 %
     box.set_illuminant(Illuminant.HalogenBF, 80)  # typo-safe enum (a plain str)
-    box.set_illuminant(4, 50)             # channel numbers work too
+    box.set_illuminant(4, 50)  # channel numbers work too
 
-    state = box.get_state()               # LightboxState(channel, illuminant, intensity)
+    state = box.get_state()  # LightboxState(channel, illuminant, intensity)
     print(f'{state.illuminant} at {state.intensity:.0f}%')
-    box.get_default_intensity('D65')      # a channel's power-on default (100.0)
-    print(box.info())                     # full snapshot: identity, illuminant maps, state
+    box.get_default_intensity('D65')  # a channel's power-on default (100.0)
+    print(box.info())  # full snapshot: identity, illuminant maps, state
 
     box.off()
 ```
@@ -103,13 +103,13 @@ is the only remedy (no meter setting extends the floor).
 ```python
 from devices import get_lightmeter
 
-with get_lightmeter() as meter:            # first attached, supported meter
-    reading = meter.measure()               # trigger and read one measurement
-    if reading.in_range:                     # False when below/above the meter's range
+with get_lightmeter() as meter:  # first attached, supported meter
+    reading = meter.measure()  # trigger and read one measurement
+    if reading.in_range:  # False when below/above the meter's range
         print(reading.illuminance_lux, reading.cct)
-    print(meter.limits)                     # MeasurementLimits, or None if undeclared
-    print(reading.to_dict())                # JSON-friendly, omitting unset fields
-    meter.read_latest()                     # last stored reading, or None
+    print(meter.limits)  # MeasurementLimits, or None if undeclared
+    print(reading.to_dict())  # JSON-friendly, omitting unset fields
+    meter.read_latest()  # last stored reading, or None
 ```
 
 ```bash
