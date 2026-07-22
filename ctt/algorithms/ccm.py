@@ -83,6 +83,7 @@ class CcmCalibration(CalibrationAlgorithm):
         test_patches: list[int] | None = None,
         matrix_selection_types: list[str] | tuple[str, ...] | None = None,
         default_ccms: list[dict] | None = None,
+        flare_compensation: bool = True,
     ) -> None:
         super().__init__(camera, platform)
         self.do_alsc_colour = do_alsc_colour
@@ -90,6 +91,7 @@ class CcmCalibration(CalibrationAlgorithm):
         self.matrix_selection = matrix_selection if matrix_selection in allowed else 'average'
         self.test_patches = list(test_patches if test_patches is not None else _DEFAULT_TEST_PATCHES)
         self.default_ccms = default_ccms
+        self.flare_compensation = flare_compensation
 
     def run(self) -> dict | None:
         cam = self.camera
@@ -126,6 +128,7 @@ class CcmCalibration(CalibrationAlgorithm):
                 matrix_selection=self.matrix_selection,
                 test_patches=self.test_patches,
                 default_ccms=self.default_ccms,
+                flare_compensation=self.flare_compensation,
             )
         except ArithmeticError:
             logger.error('ERROR: Matrix is singular!\nTake new pictures and try again...')
@@ -159,6 +162,7 @@ def ccm(
     matrix_selection: str = 'average',
     test_patches: list[int] | None = None,
     default_ccms: list[dict] | None = None,
+    flare_compensation: bool = True,
 ) -> list[dict]:
     """Finds colour correction matrices for list of images.
 
@@ -210,33 +214,28 @@ def ccm(
 
         # Calculate CCM matrix.
         ccm_matrix = do_ccm(r, g, b, m_srgb)
-        # Initial guess that the optimisation code works with.
-        # CCM layout: [R1 R2 R3; G1 G2 G3; B1 B2 B3] * [R,G,B]' = out; optimising 6 elements, r3 = 1-r1-r2.
         original_ccm = ccm_matrix
-        r1 = ccm_matrix[0]
-        r2 = ccm_matrix[1]
-        g1 = ccm_matrix[3]
-        g2 = ccm_matrix[4]
-        b1 = ccm_matrix[6]
-        b2 = ccm_matrix[7]
-
-        # Use the initial CCM as the guess for finding the optimised matrix.
-        x0 = [r1, r2, g1, g2, b1, b2]
         _test_patches = test_patches if test_patches is not None else list(_DEFAULT_TEST_PATCHES)
-        result = minimize(
-            guess,
-            x0,
-            args=(r, g, b, m_lab, matrix_selection, _test_patches),
-            tol=0.01,
+        optimised_ccm, flare = optimise_matrix(
+            ccm_matrix, r, g, b, m_lab, matrix_selection, _test_patches, flare_compensation
         )
         # Produces a color matrix with the lowest delta E possible from the input data.
         # Note it is impossible for this to reach zero since the input data is imperfect.
 
-        cam.log += '\n \n Optimised Matrix Below: \n \n'
-        [r1, r2, g1, g2, b1, b2] = result.x
-        # New optimised color correction matrix (rows sum to 1 to preserve greys).
-        optimised_ccm = [r1, r2, (1 - r1 - r2), g1, g2, (1 - g1 - g2), b1, b2, (1 - b1 - b2)]
+        # The fitted flare is a nuisance parameter: it absorbs the uniform stray
+        # light of the calibration scene so the matrix doesn't have to, and is
+        # never written to the tuning. Expressed as % of the full patch scale.
+        flare_pct = flare / 2.56
+        if flare_compensation:
+            cam.log += f'\nFitted veiling flare: {flare_pct:.2f}% of full scale (calibration only, not deployed)'
+            if abs(flare_pct) > 1.5:
+                warning = (
+                    f'CCM fit absorbed {abs(flare_pct):.1f}% veiling flare on {img.name}; '
+                    'consider a darker surround or a larger chart in frame'
+                )
+                cam.add_warning('warn', warning, image=img.name)
 
+        cam.log += '\n \n Optimised Matrix Below: \n \n'
         cam.log += str(optimised_ccm)
         cam.log += '\n Old Color Correction Matrix Below \n'
         cam.log += str(ccm_matrix)
@@ -284,6 +283,11 @@ def ccm(
         # with the patch's reference sRGB colour (0-255) for colour-coded bars.
         de_after = deltae_array(after_gamma_lab, m_lab)
 
+        # 'de_flare' scores the matrix with the fitted stray-light offset applied,
+        # i.e. the accuracy the matrix itself delivers once the calibration
+        # scene's veiling flare is discounted. Equals 'de' when compensation is off.
+        de_flare = deltae_array(rgb_to_lab((rgb_scaled + flare) @ formatted_optimised_ccm.T), m_lab)
+
         # 'de_norm' is the delta E after removing the overall-brightness offset
         # (the optimal global scale on the linear output). The CCM rows sum to 1
         # so it carries no brightness — absolute lightness is set downstream by
@@ -301,11 +305,12 @@ def ccm(
             {
                 'de': float(d),
                 'de_norm': float(dn),
+                'de_flare': float(df),
                 'rgb': [int(v) for v in rgb],
                 'uv_ref': [float(ur[0]), float(ur[1])],
                 'uv': [float(uc[0]), float(uc[1])],
             }
-            for d, dn, rgb, ur, uc in zip(de_after, de_norm, m_rgb, ref_uv, corr_uv, strict=True)
+            for d, dn, df, rgb, ur, uc in zip(de_after, de_norm, de_flare, m_rgb, ref_uv, corr_uv, strict=True)
         ]
         cam.metrics['ccm'].append(
             {
@@ -313,6 +318,8 @@ def ccm(
                 'metric': matrix_selection,
                 'metric_before': before_metric,
                 'metric_after': after_metric,
+                'metric_after_flare': float(np.mean(de_flare)),
+                'flare_pct': float(flare_pct),
                 'max_before': old_worst_delta_e,
                 'max_after': new_worst_delta_e,
                 'patches': patches,
@@ -359,6 +366,41 @@ def ccm(
     return ccms
 
 
+def optimise_matrix(
+    seed_ccm: list,
+    r: np.ndarray,
+    g: np.ndarray,
+    b: np.ndarray,
+    m_lab: np.ndarray,
+    matrix_selection: str,
+    test_patches: list[int],
+    flare_compensation: bool,
+) -> tuple[list, float]:
+    """Refine the least-squares seed against the chosen delta E metric.
+
+    With flare_compensation a scalar offset is co-fitted ahead of the matrix,
+    modelling uniform stray light on the calibration scene (which a 3x3 matrix
+    cannot represent, and would otherwise distort itself to accommodate). The
+    offset is discarded after the fit; only the matrix is returned with it.
+
+    Returns (9-element rows-sum-to-1 matrix, fitted flare on the 0-256 patch scale).
+    """
+    x0 = [seed_ccm[0], seed_ccm[1], seed_ccm[3], seed_ccm[4], seed_ccm[6], seed_ccm[7]]
+    if flare_compensation:
+        # Small negative seed: flare is additive light, so the correction is
+        # negative; seeding at zero can leave the term stuck there.
+        x0.append(-2.0)
+    result = minimize(
+        guess,
+        x0,
+        args=(r, g, b, m_lab, matrix_selection, test_patches),
+        tol=0.01,
+    )
+    [r1, r2, g1, g2, b1, b2] = result.x[:6]
+    flare = float(result.x[6]) if flare_compensation else 0.0
+    return [r1, r2, (1 - r1 - r2), g1, g2, (1 - g1 - g2), b1, b2, (1 - b1 - b2)], flare
+
+
 def guess(
     x0: list,
     r: np.ndarray,
@@ -368,10 +410,12 @@ def guess(
     matrix_selection: str = 'average',
     test_patches: list[int] | None = None,
 ) -> float:
-    """Provides numerical feedback for the optimisation: format CCM from 6 params and evaluate metric."""
-    [r1, r2, g1, g2, b1, b2] = x0
+    """Provides numerical feedback for the optimisation: format CCM from 6 params
+    (plus an optional 7th, the scalar flare offset) and evaluate the metric."""
+    [r1, r2, g1, g2, b1, b2] = x0[:6]
+    flare = float(x0[6]) if len(x0) > 6 else 0.0
     ccm_matrix = np.array([r1, r2, (1 - r1 - r2), g1, g2, (1 - g1 - g2), b1, b2, (1 - b1 - b2)]).reshape((3, 3))
-    return transform_and_evaluate(ccm_matrix, r, g, b, m_lab, matrix_selection, test_patches)
+    return transform_and_evaluate(ccm_matrix, r, g, b, m_lab, matrix_selection, test_patches, flare=flare)
 
 
 def transform_and_evaluate(
@@ -382,9 +426,14 @@ def transform_and_evaluate(
     m_lab: np.ndarray,
     matrix_selection: str = 'average',
     test_patches: list[int] | None = None,
+    flare: float = 0.0,
 ) -> float:
-    """Transform colours to LAB via CCM and return the chosen metric (average/max/sum delta E)."""
-    rgb_scaled = np.column_stack((r, g, b)) / 256
+    """Transform colours to LAB via CCM and return the chosen metric (average/max/sum delta E).
+
+    `flare` is subtracted-by-addition ahead of the matrix (it is fitted as a
+    negative offset on the 0-256 patch scale) to model uniform scene stray light.
+    """
+    rgb_scaled = np.column_stack((r, g, b)) / 256 + flare
     rgb_post_ccm = rgb_scaled @ ccm_matrix.T  # RGB after color correction matrix
     lab_post_ccm = rgb_to_lab(rgb_post_ccm)
     de = deltae_array(lab_post_ccm, m_lab)

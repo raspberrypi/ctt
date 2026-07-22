@@ -141,6 +141,7 @@ def run_ctt(
     ccm_matrix_selection = ccm_d.get('matrix_selection', 'average')
     ccm_matrix_selection_types = ccm_d.get('matrix_selection_types', ['average', 'maximum', 'patches'])
     ccm_test_patches = ccm_d.get('test_patches', [1, 2, 5, 8, 9, 12, 14])
+    ccm_flare = int(bool(ccm_d.get('flare_compensation', 1)))
     lux_d = configs.get('lux', {})
     # reference_target: lux to anchor the lux calibration on (single capture nearest it);
     # 0 calibrates from a robust average across all captures instead, combined via
@@ -196,7 +197,8 @@ def run_ctt(
         'Options',
         f'  ALSC    do_alsc_colour={do_alsc_colour}  luminance_strength={luminance_strength}  max_gain={lsc_max_gain}',
         f'  AWB     greyworld={greyworld}   Blacklevel  {blacklevel}   Macbeth  small={mac_small}  show={mac_show}',
-        f'  CCM     matrix_selection={ccm_matrix_selection}  test_patches={ccm_test_patches}',
+        f'  CCM     matrix_selection={ccm_matrix_selection}  test_patches={ccm_test_patches}'
+        f'  flare_compensation={ccm_flare}',
         f'  LUX     reference_target={lux_reference_target}'
         + (f'  method={lux_reference_method}' if lux_reference_target == 0 else ''),
         f'  Disable {disable_str}',
@@ -288,6 +290,7 @@ def run_ctt(
                 ccm_test_patches,
                 ccm_matrix_selection_types,
                 default_ccms,
+                flare_compensation=bool(ccm_flare),
             ),
         ]
 
@@ -329,6 +332,7 @@ def run_ctt(
                 'max_gain': lsc_max_gain,
                 'do_alsc_colour': do_alsc_colour,
                 'matrix_selection': ccm_matrix_selection,
+                'flare_compensation': ccm_flare,
                 'greyworld': greyworld,
                 'blacklevel': blacklevel,
                 'lux_reference_target': lux_reference_target,

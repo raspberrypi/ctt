@@ -282,7 +282,7 @@ tagging or sweeping against a bad reading. The web UI shows out-of-range values 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/projects/<name>/run/stream` | Run CTT, streaming output as server-sent events. Query params: `targets` (`pisp,vc4`), `mode` (`full`/`alsc-only`/`colour-only`), plus config overrides (`greyworld`, `do_alsc_colour`, `luminance_strength`, `max_gain`, `blacklevel`, `disable`, `matrix_selection`, `test_patches`, `lux_reference_target`, `lux_reference_method`) |
+| GET | `/projects/<name>/run/stream` | Run CTT, streaming output as server-sent events. Query params: `targets` (`pisp,vc4`), `mode` (`full`/`alsc-only`/`colour-only`), plus config overrides (`greyworld`, `do_alsc_colour`, `luminance_strength`, `max_gain`, `blacklevel`, `disable`, `matrix_selection`, `test_patches`, `flare_compensation`, `lux_reference_target`, `lux_reference_method`) |
 | GET | `/projects/<name>/results/data?target=` | Parsed tuning data for the Results visualisations |
 | GET | `/projects/<name>/archive` | The whole project (DNGs + outputs) as a zip |
 | GET | `/projects/<name>/download/<kind>/<target>` | Download an output; `kind` is `json`, `log` or `custom` |

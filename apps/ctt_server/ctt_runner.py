@@ -47,7 +47,10 @@ def build_config(options: dict) -> dict:
     matrix_selection = ccm.get('matrix_selection', 'average')
     if matrix_selection not in _CCM_MATRIX_SELECTIONS:
         matrix_selection = 'average'
-    ccm_config: dict = {'matrix_selection': matrix_selection}
+    ccm_config: dict = {
+        'matrix_selection': matrix_selection,
+        'flare_compensation': int(bool(ccm.get('flare_compensation', 1))),
+    }
     # test_patches only matters for the 'patches' selection; pass it through when given.
     test_patches = ccm.get('test_patches')
     if test_patches:

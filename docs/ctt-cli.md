@@ -122,6 +122,11 @@ An optional JSON config file controls calibration behaviour. See
         "small": 0,
         "show": 0
     },
+    "ccm": {
+        "matrix_selection": "average",
+        "test_patches": [1, 2, 5, 8, 9, 12, 14],
+        "flare_compensation": 1
+    },
     "gamma": {
         "target": "sRGB"
     }
@@ -137,6 +142,9 @@ An optional JSON config file controls calibration behaviour. See
 - **blacklevel** - Override black level; -1 to auto-detect (default: -1)
 - **macbeth.small** - Use small Macbeth chart detection (default: 0)
 - **macbeth.show** - Display detected Macbeth chart (default: 0)
+- **ccm.matrix_selection** - Delta E statistic the CCM fit minimises: `average` (default), `maximum`, or `patches` (sum over `test_patches`)
+- **ccm.test_patches** - Macbeth patch indices used by the `patches` selection (default: `[1, 2, 5, 8, 9, 12, 14]`)
+- **ccm.flare_compensation** - Co-fit a scalar stray-light offset with each CCM so uniform veiling flare on the calibration scene does not distort the matrix; the offset itself is never written to the tuning (default: 1). The fitted flare is logged and reported in the metrics (`flare_pct`, and per-patch `de_flare` for the flare-discounted accuracy); a warning is raised when it exceeds 1.5% of full scale, which usually means the chart needs a darker surround or should fill more of the frame.
 - **gamma.target** - Target transfer function the gamma verification reports against: `sRGB` (default), `rec709`, `rec2020`, or a power law `power:<n>` (e.g. `power:2.2`). Diagnostic only - the gamma curve is never tuned.
 
 ## Calibration images
