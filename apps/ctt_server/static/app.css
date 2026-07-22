@@ -172,6 +172,8 @@ input, select, textarea {
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 input:disabled, select:disabled, textarea:disabled { opacity: 0.45; cursor: not-allowed; }
 .field { margin-bottom: 14px; }
+/* A read-out value that is out of range / not trustworthy. */
+.value-bad { color: var(--err); }
 .field-row { display: flex; gap: 12px; }
 .field-row .field { flex: 1; }
 .hint { font-size: 0.78rem; color: var(--text-faint); margin-top: 5px; }

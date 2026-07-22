@@ -35,7 +35,7 @@ class ScriptedMeter:
         if entry is None:
             raise LightmeterError('scripted failure')
         lux, cct = entry
-        return Measurement(illuminance_lux=lux, cct=cct)
+        return Measurement(illuminance_lux=lux, cct=cct, in_range=lux >= 1.0)
 
 
 def steady_meter(lux=1000.0, cct=5000.0):
@@ -194,6 +194,20 @@ def test_persistent_meter_failure_fails_the_lamp_and_continues(project):
     assert lamp_error['illuminant'] == 'F12'
     done = stream[-1]
     assert done['failed'] == ['F12'] and done['ok'] is False and done['captured'] == 1
+
+
+def test_under_range_readings_fail_the_lamp(project):
+    # A persistently under-range (below-limit) lamp fails with a clear message and is
+    # never tagged/captured.
+    dark_then_ok = ScriptedMeter([(-100.0, 0.0), (-100.0, 0.0), (-100.0, 0.0), (1000.0, 5000.0)])
+    stream = drain(
+        run_auto_capture_stream(
+            project, FakeCam(), FakeBox(), dark_then_ok, [LampStep('F12'), LampStep('D65')], frames=1, cfg=FAST
+        )
+    )
+    (lamp_error,) = events(stream, 'lamp_error')
+    assert lamp_error['illuminant'] == 'F12' and 'range' in lamp_error['error'].lower()
+    assert stream[-1]['failed'] == ['F12'] and stream[-1]['captured'] == 1
 
 
 # --- generator: chart-aware light adjustment ---------------------------------------

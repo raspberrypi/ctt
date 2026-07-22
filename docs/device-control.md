@@ -91,12 +91,23 @@ XYZ, dominant wavelength, excitation purity, CRI (Ra and R1–R15) and the 380�
 spectrum where the device supplies them. `read_latest()` returns the device's last
 reading without triggering a new one.
 
+**Measurement limits.** A meter may declare its valid range via `LightMeter.limits`
+(a `MeasurementLimits` with `illuminance_min`/`illuminance_max`, `colour_min_lux` and
+`cct_min`/`cct_max`). When a reading's illuminance falls outside the range the device
+returns under/over-range sentinels (the CL-70F reports e.g. `-100 lx`), so `measure()`
+sets `Measurement.in_range = False` — the numbers are not a real measurement and must
+not be trusted. The CL-70F's range is **1–200,000 lx** (colour metrics need **≥ 5 lx**),
+CCT **1,563–100,000 K**; below ~1 lx you get an out-of-range reading, and adding light
+is the only remedy (no meter setting extends the floor).
+
 ```python
 from devices import get_lightmeter
 
 with get_lightmeter() as meter:            # first attached, supported meter
     reading = meter.measure()               # trigger and read one measurement
-    print(reading.illuminance_lux, reading.cct)
+    if reading.in_range:                     # False when below/above the meter's range
+        print(reading.illuminance_lux, reading.cct)
+    print(meter.limits)                     # MeasurementLimits, or None if undeclared
     print(reading.to_dict())                # JSON-friendly, omitting unset fields
     meter.read_latest()                     # last stored reading, or None
 ```

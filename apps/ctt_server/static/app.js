@@ -177,7 +177,7 @@ function captureApp(cfg) {
     clip: { r: 0, g: 0, b: 0 },
     macbeth: { found: false, confidence: null, corners: null, small: false, saturated: false },
     lightbox: { present: false, channel: null, illuminant: '', intensity: 0, illuminants: {} },
-    lightmeter: { present: false, model: '', serial: '', reading: null, busy: false, auto: true, updated: '' },
+    lightmeter: { present: false, model: '', serial: '', reading: null, limits: null, busy: false, auto: true, updated: '' },
     busy: false,
     error: '',
     hflip: false,
@@ -305,11 +305,29 @@ function captureApp(cfg) {
       finally { this.lightmeter.busy = false; }
     },
 
+    // Illuminance readout, capped to the meter's limits: "< min" / "> max" out of
+    // range (the API clamps the number), otherwise the value.
+    meterIlluminanceText() {
+      const r = this.lightmeter.reading, lim = this.lightmeter.limits;
+      if (!r) return '—';
+      if (r.in_range === false && lim) {
+        return r.illuminance_lux <= lim.illuminance_min ? `< ${lim.illuminance_min} lx` : `> ${lim.illuminance_max} lx`;
+      }
+      return r.illuminance_lux.toFixed(1) + ' lx';
+    },
+
+    // True when the colour metrics can't be trusted: illuminance out of range, or
+    // below the colour floor (colour needs more light than illuminance).
+    meterColourUnderRange() {
+      const r = this.lightmeter.reading, lim = this.lightmeter.limits;
+      return !!(r && lim && (r.in_range === false || r.illuminance_lux < lim.colour_min_lux));
+    },
+
     // Copy the latest meter reading into the capture tags (rounded to the
-    // filename's integer convention).
+    // filename's integer convention). An out-of-range reading is ignored.
     tagFromMeter() {
       const r = this.lightmeter.reading;
-      if (!r) return;
+      if (!r || r.in_range === false) return;
       this.form.colour_temp = Math.round(r.cct);
       this.form.lux = Math.round(r.illuminance_lux);
     },
@@ -1044,7 +1062,7 @@ function resultsApp(cfg) {
     controls: { auto_exposure: true, exposure: 0, gain: 1, ev: 0 },  // exposure panel state
     fpsTarget: 30,  // framerate target; 0 = unconstrained (variable frame duration)
     lightbox: { present: false, channel: null, intensity: 0, illuminants: {} },  // optional lightbox device
-    lightmeter: { present: false, model: '', serial: '', reading: null, busy: false, auto: true, updated: '' },  // optional light meter
+    lightmeter: { present: false, model: '', serial: '', reading: null, limits: null, busy: false, auto: true, updated: '' },  // optional light meter
     colour: null,         // current live ΔE reading (for whichever tuning is loaded)
     liveColour: true,     // semi-live colour measurement while previewing
     chartSeen: null,      // null = no reading yet, false = chart not found, {confidence} = found
@@ -1362,6 +1380,22 @@ function resultsApp(cfg) {
         else { const d = await r.json().catch(() => ({})); this.error = d.error || 'Light-meter sample failed'; }
       } catch (e) { this.error = 'Light-meter request failed'; }
       finally { this.lightmeter.busy = false; }
+    },
+
+    // Illuminance readout capped to the meter's limits ("< min" / "> max" out of range).
+    meterIlluminanceText() {
+      const r = this.lightmeter.reading, lim = this.lightmeter.limits;
+      if (!r) return '—';
+      if (r.in_range === false && lim) {
+        return r.illuminance_lux <= lim.illuminance_min ? `< ${lim.illuminance_min} lx` : `> ${lim.illuminance_max} lx`;
+      }
+      return r.illuminance_lux.toFixed(1) + ' lx';
+    },
+
+    // Colour metrics are invalid when out of range or below the colour floor.
+    meterColourUnderRange() {
+      const r = this.lightmeter.reading, lim = this.lightmeter.limits;
+      return !!(r && lim && (r.in_range === false || r.illuminance_lux < lim.colour_min_lux));
     },
 
     async previewStandard() {

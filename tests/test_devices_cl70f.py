@@ -200,7 +200,37 @@ def test_measure_runs_the_full_sequence():
     reading = meter.measure()
     assert reading.illuminance_lux == pytest.approx(321.0)
     assert reading.cct == pytest.approx(4200.0)
+    assert reading.in_range is True  # 321 lx is within the rated range
     assert transport.sent == [b'RT1', b'RM0', b'ST', b'ST', b'NR']
+
+
+def _measure_once(nr_red):
+    """Drive one full measure() cycle returning the given NR payload."""
+    transport = FakeTransport(
+        [
+            ACK_REPLY,
+            _data_reply('RT', sta1=REMOTE),
+            ACK_REPLY,
+            _data_reply('RM', sta1=BUSY),
+            ACK_REPLY,
+            _data_reply('ST', sta1=REMOTE),
+            ACK_REPLY,
+            _data_reply('NR', sta1=REMOTE, red=nr_red),
+        ]
+    )
+    return CL70F(transport).measure()
+
+
+def test_measure_flags_out_of_range_reading():
+    # Below the rated 1 lx floor (the meter's under-range sentinel) → in_range False.
+    reading = _measure_once(_make_nr_red(illuminance_lx=-100.0, colour_temperature=0.0))
+    assert reading.in_range is False
+
+
+def test_limits_reported():
+    limits = CL70F(FakeTransport([])).limits
+    assert limits.illuminance_min == 1.0 and limits.illuminance_max == 200000.0
+    assert limits.colour_min_lux == 5.0
 
 
 def test_measure_raises_on_error_state():

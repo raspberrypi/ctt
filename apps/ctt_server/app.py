@@ -78,6 +78,44 @@ def _run_info(available: dict) -> dict:
     return info
 
 
+# Colour metrics that are invalid (and dropped) when there is too little light.
+_COLOUR_KEYS = (
+    'cct',
+    'duv',
+    'cie1931_xy',
+    'cie1976_uv',
+    'cie1960_uv',
+    'tristimulus_xyz',
+    'dominant_wavelength',
+    'excitation_purity',
+    'cri_ra',
+    'cri_ri',
+    'spectrum_5nm',
+    'spectrum_1nm',
+)
+
+
+def _capped_reading(measurement, limits) -> dict:
+    """A reading dict that never exceeds the meter's limits.
+
+    Out-of-range illuminance is clamped to the nearest bound (so the API never emits
+    the device's sentinels, e.g. -100 lx), and colour metrics are dropped when there is
+    less light than they need (below `colour_min_lux`), since they are meaningless there.
+    `in_range` stays on the dict so the UI can render the capped value as "< min"/"> max".
+    """
+    reading = measurement.to_dict()
+    if limits is None:
+        return reading
+    lux = measurement.illuminance_lux
+    if not measurement.in_range:
+        reading['illuminance_lux'] = min(max(lux, limits.illuminance_min), limits.illuminance_max)
+        reading.pop('illuminance_fc', None)
+    if not measurement.in_range or lux < limits.colour_min_lux:
+        for key in _COLOUR_KEYS:
+            reading.pop(key, None)
+    return reading
+
+
 def _serialise_captures(project: Project) -> list[dict]:
     """Capture metadata for the browser, with a per-file validity flag."""
     out = []
@@ -228,15 +266,20 @@ def create_app(workspace_root: str | None = None) -> Flask:
 
     def lightmeter_reading_or_none() -> dict | None:
         """A fresh reading for tagging a capture, or None. Never raises: a capture
-        must succeed unchanged when no meter is present or the reading fails."""
+        must succeed unchanged when no meter is present or the reading fails, and an
+        out-of-range reading is treated as no reading so garbage is never recorded."""
         meter = lightmeter_or_none()
         if meter is None:
             return None
         try:
-            reading = meter.measure().to_dict()
+            measurement = meter.measure()
         except LightmeterError as err:
             logger.warning('capture: light-meter reading failed: %s', err)
             return None
+        if not measurement.in_range:
+            logger.warning('capture: light-meter reading out of range; not recorded')
+            return None
+        reading = measurement.to_dict()
         # Keep the project sidecar compact: the 5 nm spectrum is plenty.
         reading.pop('spectrum_1nm', None)
         return reading
@@ -497,7 +540,7 @@ def create_app(workspace_root: str | None = None) -> Flask:
                 return jsonify({'error': f'unknown action {action!r}'}), 400
         except LightmeterError as err:
             return jsonify({'error': str(err)}), 400
-        return jsonify({'present': True, **meter.info(), 'reading': reading.to_dict()})
+        return jsonify({'present': True, **meter.info(), 'reading': _capped_reading(reading, meter.limits)})
 
     # --- auto-capture cycle --------------------------------------------------
     def sse_response(events):
