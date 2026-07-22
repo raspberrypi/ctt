@@ -285,8 +285,11 @@ def ccm(
 
         # 'de_flare' scores the matrix with the fitted stray-light offset applied,
         # i.e. the accuracy the matrix itself delivers once the calibration
-        # scene's veiling flare is discounted. Equals 'de' when compensation is off.
-        de_flare = deltae_array(rgb_to_lab((rgb_scaled + flare) @ formatted_optimised_ccm.T), m_lab)
+        # scene's veiling flare is discounted. Omitted entirely when compensation
+        # is off, so the UI only shows the stat for runs that actually fitted it.
+        de_flare = None
+        if flare_compensation:
+            de_flare = deltae_array(rgb_to_lab((rgb_scaled + flare) @ formatted_optimised_ccm.T), m_lab)
 
         # 'de_norm' is the delta E after removing the overall-brightness offset
         # (the optimal global scale on the linear output). The CCM rows sum to 1
@@ -305,26 +308,27 @@ def ccm(
             {
                 'de': float(d),
                 'de_norm': float(dn),
-                'de_flare': float(df),
                 'rgb': [int(v) for v in rgb],
                 'uv_ref': [float(ur[0]), float(ur[1])],
                 'uv': [float(uc[0]), float(uc[1])],
             }
-            for d, dn, df, rgb, ur, uc in zip(de_after, de_norm, de_flare, m_rgb, ref_uv, corr_uv, strict=True)
+            for d, dn, rgb, ur, uc in zip(de_after, de_norm, m_rgb, ref_uv, corr_uv, strict=True)
         ]
-        cam.metrics['ccm'].append(
-            {
-                'ct': img.col,
-                'metric': matrix_selection,
-                'metric_before': before_metric,
-                'metric_after': after_metric,
-                'metric_after_flare': float(np.mean(de_flare)),
-                'flare_pct': float(flare_pct),
-                'max_before': old_worst_delta_e,
-                'max_after': new_worst_delta_e,
-                'patches': patches,
-            }
-        )
+        entry = {
+            'ct': img.col,
+            'metric': matrix_selection,
+            'metric_before': before_metric,
+            'metric_after': after_metric,
+            'max_before': old_worst_delta_e,
+            'max_after': new_worst_delta_e,
+            'patches': patches,
+        }
+        if de_flare is not None:
+            for p, df in zip(patches, de_flare, strict=True):
+                p['de_flare'] = float(df)
+            entry['metric_after_flare'] = float(np.mean(de_flare))
+            entry['flare_pct'] = float(flare_pct)
+        cam.metrics['ccm'].append(entry)
 
         # Also evaluate the built-in default tuning's CCM against the same patches,
         # so the UI can show "new calibration vs shipped default" colour accuracy.
