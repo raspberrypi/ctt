@@ -15,18 +15,16 @@
             x-text="progress.total ? 'point ' + progress.index + '/' + progress.total : 'running'"></span>
     </div>
     <div class="banner error" x-show="error" x-text="error" x-cloak></div>
-    <p class="hint" style="margin-top:0">Finds the smallest sharpening threshold that does not amplify sensor
-      noise: the sweep captures the Macbeth chart with sharpening disabled, then at each candidate threshold,
-      and compares the spatial noise on the grey (bottom-row) patches. Frame the chart on the Capture tab
-      first — static and steadily lit (a lightbox works well). Each point reloads the camera with a modified
-      tuning, so the preview will blink and a run takes a few minutes.</p>
+    <p class="hint" style="margin-top:0">Finds the smallest threshold that does not amplify sensor noise, by
+      comparing grey-patch noise at each candidate against a sharpening-off baseline. Frame the Macbeth chart
+      first (static, steadily lit); the preview blinks as each point reloads the camera. See the ctt-server
+      docs for the full method.</p>
 
     <div class="field-row" style="align-items:flex-start">
       <div class="field" style="margin-bottom:0">
         <label>Gain</label>
         <input type="number" x-model.number="gain" min="1" max="64" step="0.5">
-        <div class="hint">Analogue gain to measure at — high enough that noise is clearly visible.
-          The stored threshold is a compromise: tuned here, softer below, noisier above.</div>
+        <div class="hint">High, so sensor noise is clearly measurable.</div>
       </div>
       <div class="field" style="margin-bottom:0">
         <label>Frames</label>
@@ -89,10 +87,8 @@
     </div>
 
     <div class="chart-box"><canvas id="sharpenChart"></canvas></div>
-    <p class="hint">Spatial noise on each grey patch relative to the sharpen-disabled baseline (1.0 = no
-      amplification), against the threshold on a log axis. Low thresholds sharpen the noise itself; the
-      recommended value is the smallest that stays within tolerance, keeping the most real-detail
-      sharpening. Patch 1 is white, patch 6 black.</p>
+    <p class="hint">Grey-patch noise relative to the sharpen-disabled baseline (1.0 = no amplification).
+      The recommendation is the smallest threshold within tolerance. Patch 1 is white, patch 6 black.</p>
     <div class="hint" x-show="warnings.length" x-cloak>
       <template x-for="w in warnings"><div x-text="'⚠ ' + w"></div></template>
     </div>
@@ -125,23 +121,17 @@
     <div class="card-head">
       <h2>Sharpening strength &amp; limit</h2>
     </div>
-    <p class="hint" style="margin-top:0">Tunes how hard edges are sharpened (<b>strength</b>) and the halo cap on
-      strong edges (<b>limit</b>) by measuring a slanted edge in the processed output: MTF50 boost, MTF peak and the
-      edge halos (over/undershoot) against a sharpening-off baseline. An ISO 12233 / eSFR chart (as used by the MTF
-      tab) is the ideal target — its edges are moderate contrast (drives the strength choice) and its registration
-      marks give the strong black/white edges the limit choice needs; keep the Macbeth chart in the scene too and
-      grey-patch noise is recorded per point. Include a finely textured object as well (newspaper, fabric, yarn):
-      faint texture is measured per point and stops the recommendation trading texture away for edge crispness.
-      Tune and apply the threshold first; all figures are ratios against the same scene, so keep it static and
-      steadily lit.</p>
+    <p class="hint" style="margin-top:0">Tunes the edge gain (<b>strength</b>) and the per-pixel delta cap
+      (<b>limit</b>) against a sharpening-off baseline. Scene: an ISO 12233 / eSFR chart (moderate and strong
+      edges), the Macbeth chart, and a finely textured object (newspaper, fabric, yarn) for the texture floor.
+      Tune and apply the threshold first, and keep the scene static and steadily lit. See the ctt-server docs
+      for the full method.</p>
 
     <div class="field-row" style="align-items:flex-start">
       <div class="field" style="margin-bottom:0">
         <label>Gain</label>
         <input type="number" x-model.number="sGain" min="1" max="64" step="0.5">
-        <div class="hint">Low gain is the worst case for halos — denoise barely
-          intervenes and sharpening acts at full force — the opposite of the
-          threshold sweep's high gain.</div>
+        <div class="hint">Low — the worst case for halos.</div>
       </div>
       <div class="field" style="margin-bottom:0; flex: 2">
         <label>Strengths</label>
@@ -220,13 +210,9 @@
         <canvas id="limitChart"></canvas>
       </div>
     </div>
-    <p class="hint">Left: sharpness gained against edge halo growth as the strength rises. Acutance (the
-      contrast-sensitivity-weighted MTF area) is the headline: sharpening lifts the mid/high band it integrates,
-      where MTF50 — often pinned by the optics — barely moves. Texture is the high-frequency energy gain on
-      faint-texture tiles picked from the baseline — the detail only the strength renders. The recommendation is
-      the strength with the greatest acutance gain within the halo and MTF-peak caps whose texture gain stays
-      within 5% of the best candidate's. Right: halo growth on the high-contrast edge as the limit rises,
-      measured at the recommended strength.</p>
+    <p class="hint">Left: acutance, texture and halo growth against strength. The recommendation is the greatest
+      acutance gain within the caps whose texture gain stays within 5% of the best candidate's. Right: halo
+      growth against limit on the high-contrast edge, at the recommended strength.</p>
     <div class="hint" x-show="sWarnings.length" x-cloak>
       <template x-for="w in sWarnings"><div x-text="'⚠ ' + w"></div></template>
     </div>
