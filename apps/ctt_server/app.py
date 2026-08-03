@@ -32,7 +32,7 @@ from flask import (
 
 from devices import LightboxError, LightmeterError, get_shared_lightbox, get_shared_lightmeter
 
-from . import auto_capture, auto_characterise, characterise, colour_check, ctt_runner, mtf, results
+from . import auto_capture, auto_characterise, characterise, colour_check, ctt_runner, mtf, results, sharpen
 from .camera import (
     MJPEG_CONTENT_TYPE,
     CameraError,
@@ -1016,6 +1016,103 @@ def create_app(workspace_root: str | None = None) -> Flask:
             logger.exception('MTF measurement failed for %s', name)
             return jsonify({'error': 'MTF measurement failed (is the capture a valid DNG?)'}), 500
         return jsonify({'rois': results_list})
+
+    # --- sharpen threshold tuning ---------------------------------------------
+    # Sweeps rpi.sharpen.threshold over temp tunings and measures grey-patch
+    # noise in the processed output. Results live in <project>/sharpen/, which
+    # calibration runs never scan — the same isolation as <project>/mtf/.
+
+    @app.route('/projects/<name>/sharpen')
+    def sharpen_page(name: str):
+        proj = get_project_or_404(name)
+        return render_template('sharpen.html', project=proj)
+
+    @app.route('/projects/<name>/sharpen/data')
+    def sharpen_data(name: str):
+        """Stored sweep results plus what a new sweep/apply would operate on."""
+        proj = get_project_or_404(name)
+        target = platform_target()
+        base = None
+        model = None
+        with contextlib.suppress(CameraError):
+            model = get_shared_camera().model
+        if target:
+            found = sharpen.base_tuning(proj, target, model)
+            if found:
+                base = {'kind': found[1], 'name': found[0].name}
+        generated = target and (proj.output_dir / f'{proj.name}_{target}.json').exists()
+        return jsonify(
+            {
+                'results': sharpen.read_results(proj),
+                'target': target,
+                'base': base,
+                'can_apply': bool(generated),
+                'running': sharpen.is_running(),
+            }
+        )
+
+    @app.route('/projects/<name>/sharpen/sweep/stream')
+    def sharpen_sweep_stream(name: str):
+        """Run a sharpen-threshold sweep, streaming progress as SSE.
+
+        Validation and camera failures are streamed as an error event rather
+        than returned as a 4xx (EventSource cannot read error bodies).
+        """
+        proj = get_project_or_404(name)
+
+        def error_events(message: str):
+            return iter([{'event': 'error', 'error': message}])
+
+        try:
+            gain = float(request.args.get('gain', sharpen.DEFAULT_GAIN))
+            frames = int(request.args.get('frames', sharpen.DEFAULT_FRAMES))
+            tolerance = float(request.args.get('tolerance', sharpen.DEFAULT_TOLERANCE))
+            raw = request.args.get('thresholds', '').strip()
+            thresholds = [float(t) for t in raw.split(',') if t.strip()] if raw else None
+        except ValueError:
+            return sse_response(error_events('invalid sweep settings'))
+        try:
+            camera = get_shared_camera()
+        except CameraError as err:
+            return sse_response(error_events(str(err)))
+        return sse_response(
+            sharpen.sweep_stream(proj, camera, gain=gain, frames=frames, thresholds=thresholds, tolerance=tolerance)
+        )
+
+    @app.route('/projects/<name>/sharpen/apply', methods=['POST'])
+    def sharpen_apply(name: str):
+        """Write a sweep-derived threshold into the project's generated tuning.
+
+        The threshold is a calibration result, so it lands in the generated
+        file (like an import) rather than forking a custom variant — variants
+        based on the file correctly show as stale afterwards.
+        """
+        proj = get_project_or_404(name)
+        body = request.get_json(force=True) or {}
+        try:
+            threshold = float(body['threshold'])
+        except (KeyError, TypeError, ValueError):
+            return jsonify({'error': 'threshold must be a number'}), 400
+        if not 0 < threshold <= 16:
+            return jsonify({'error': 'threshold out of range (0, 16]'}), 400
+        target = platform_target()
+        if target is None:
+            return jsonify({'error': 'could not determine the ISP platform'}), 503
+        tuning_path = proj.output_dir / f'{proj.name}_{target}.json'
+        if not tuning_path.exists():
+            return jsonify({'error': f'no generated tuning for {target} — run CTT first'}), 400
+        try:
+            tuning = json.loads(tuning_path.read_text())
+        except (OSError, json.JSONDecodeError) as err:
+            return jsonify({'error': f'could not read {tuning_path.name}: {err}'}), 500
+        sharpen.set_sharpen(tuning, threshold=threshold)
+        tuning_path.write_text(json.dumps(tuning, indent=4))
+        stored = sharpen.read_results(proj)
+        if stored is not None:
+            applied_at = datetime.now().astimezone().isoformat(timespec='seconds')
+            stored['applied'] = {'threshold': threshold, 'at': applied_at}
+            sharpen.results_path(proj).write_text(json.dumps(stored, indent=2))
+        return jsonify({'ok': True, 'file': tuning_path.name, 'threshold': threshold})
 
     # --- sensor characterisation --------------------------------------------
     # Offline analysis of the project's existing captures (dark bursts, ALSC

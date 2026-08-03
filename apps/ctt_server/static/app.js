@@ -2686,3 +2686,171 @@ function characterisationApp(cfg) {
     },
   };
 }
+
+// --- sharpen page --------------------------------------------------------------
+function sharpenApp(cfg) {
+  return {
+    project: cfg.project,
+    results: null,        // persisted results.json contents (or null)
+    base: null,           // tuning a sweep would start from {kind, name}
+    canApply: false,      // a generated tuning exists for the live target
+    running: false,
+    applying: false,
+    error: '',
+    source: null,
+    chart: null,
+    showPoints: false,
+    log: [],
+    progress: { index: 0, total: 0 },
+    livePoints: [],       // points streamed by the current run (chart updates live)
+    // Sweep settings (defaults mirror the server's).
+    gain: 8,
+    frames: 4,
+    thresholds: '0.02, 0.05, 0.1, 0.2, 0.4, 0.75, 1.5, 2.5, 4.0',
+    tolerance: 1.05,
+
+    get recommended() { return (this.results && this.results.recommended) || null; },
+    get points() { return (this.results && this.results.points) || []; },
+    get applied() { return (this.results && this.results.applied) || null; },
+    get settings() { return (this.results && this.results.settings) || null; },
+    get warnings() {
+      const run = (this.results && this.results.warnings) || [];
+      const perPoint = this.points.flatMap((p) => (p.warnings || []).map((w) => `threshold ${p.threshold}: ${w}`));
+      return run.concat(perPoint);
+    },
+
+    async init() { await this.load(true); },
+
+    async load(adoptRunning = false) {
+      try {
+        const r = await fetch(`/projects/${this.project}/sharpen/data`);
+        if (!r.ok) throw new Error();
+        const d = await r.json();
+        this.results = d.results;
+        this.base = d.base;
+        this.canApply = !!d.can_apply;
+        // Only the initial page load adopts the server's running state (a sweep
+        // started elsewhere). The refresh after our own run must not: the server
+        // is still restoring the camera then, and re-latching sticks the button.
+        if (adoptRunning && d.running) this.running = true;
+        if (this.settings) {
+          this.gain = this.settings.gain;
+          this.frames = this.settings.frames;
+          this.tolerance = this.settings.tolerance;
+          this.thresholds = this.settings.thresholds.join(', ');
+        }
+        this.$nextTick(() => this.render(this.points));
+      } catch (e) { this.error = 'Failed to load sharpen data'; }
+    },
+
+    run() {
+      if (this.running) return;
+      this.running = true;
+      this.error = '';
+      this.log = [];
+      this.livePoints = [];
+      this.progress = { index: 0, total: 0 };
+      const params = new URLSearchParams({
+        gain: this.gain, frames: this.frames,
+        thresholds: this.thresholds, tolerance: this.tolerance,
+      });
+      this.source = new EventSource(`/projects/${this.project}/sharpen/sweep/stream?${params}`);
+      this.source.onmessage = (e) => this.onEvent(JSON.parse(e.data));
+      this.source.onerror = () => {
+        if (this.running) { this.error = 'Sweep stream interrupted'; this.finish(); }
+      };
+    },
+
+    onEvent(ev) {
+      switch (ev.event) {
+        case 'start':
+          this.progress.total = ev.total;
+          this.pushLog(`sweep started: ${ev.thresholds.length} thresholds at gain ${ev.gain}, `
+            + `base tuning ${ev.base.name} (${ev.base.kind})`);
+          break;
+        case 'log': this.pushLog(ev.line); break;
+        case 'chart': this.pushLog(`chart located (confidence ${ev.confidence})`); break;
+        case 'baseline':
+          this.progress.index = ev.index + 1;
+          this.pushLog(`baseline captured: patch noise ${ev.patch_noise.map((n) => n.toFixed(2)).join(', ')}`);
+          break;
+        case 'point':
+          this.progress.index = ev.index + 1;
+          this.livePoints.push(ev);
+          this.pushLog(`threshold ${ev.threshold}: noise ratio ${ev.aggregate.toFixed(3)}`);
+          this.$nextTick(() => this.render(this.livePoints));
+          break;
+        case 'error': this.error = ev.error; this.finish(); break;
+        case 'done': this.finish(); this.load(); break;
+      }
+    },
+
+    pushLog(line) {
+      this.log.push(line);
+      if (this.log.length > 200) this.log.shift();
+      this.$nextTick(() => {
+        const box = this.$refs.console && this.$refs.console.closest('.console');
+        if (box) box.scrollTop = box.scrollHeight;
+      });
+    },
+
+    finish() {
+      this.running = false;
+      if (this.source) { this.source.close(); this.source = null; }
+    },
+
+    async apply() {
+      if (!this.recommended || this.recommended.threshold === null) return;
+      this.applying = true;
+      this.error = '';
+      try {
+        const r = await fetch(`/projects/${this.project}/sharpen/apply`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ threshold: this.recommended.threshold }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'apply failed');
+        await this.load();
+      } catch (e) { this.error = e.message; }
+      this.applying = false;
+    },
+
+    // Noise amplification vs threshold: six thin per-patch traces (white→black
+    // greys), a bold median, the tolerance as a dashed rule, the recommended
+    // point ringed. Log x — thresholds are geometrically spaced.
+    render(points) {
+      const canvas = document.getElementById('sharpenChart');
+      if (!canvas || !points.length) return;
+      if (this.chart) { this.chart.destroy(); this.chart = null; }
+      const pts = [...points].sort((a, b) => a.threshold - b.threshold);
+      const greys = ['#e6edf3', '#c9d2dc', '#a7b3c0', '#87939f', '#68737f', '#4b545f'];
+      const datasets = greys.map((colour, i) => ({
+        label: `patch ${i + 1}`, type: 'line', borderColor: colour, backgroundColor: colour,
+        borderWidth: 1, pointRadius: 2,
+        data: pts.map((p) => ({ x: p.threshold, y: p.ratios[i] })),
+      }));
+      datasets.push({
+        label: 'median', type: 'line', borderColor: '#f06595', backgroundColor: '#f06595',
+        borderWidth: 3, pointRadius: 4,
+        data: pts.map((p) => ({ x: p.threshold, y: p.aggregate })),
+      });
+      const tolerance = this.settings ? this.settings.tolerance : this.tolerance;
+      datasets.push({
+        label: 'tolerance', type: 'line', borderColor: '#9aa7b8', borderDash: [6, 4],
+        borderWidth: 1, pointRadius: 0,
+        data: [pts[0], pts[pts.length - 1]].map((p) => ({ x: p.threshold, y: tolerance })),
+      });
+      const rec = this.recommended;
+      if (rec && rec.threshold !== null) {
+        datasets.push({
+          label: 'recommended', type: 'scatter', pointRadius: 8, pointStyle: 'circle',
+          borderColor: '#b2f2bb', backgroundColor: 'transparent', borderWidth: 3,
+          data: [{ x: rec.threshold, y: rec.aggregate }],
+        });
+      }
+      const opts = chartOpts('Sharpen threshold', 'Grey-patch noise ÷ baseline');
+      opts.scales.x.type = 'logarithmic';
+      this.chart = new Chart(canvas.getContext('2d'), { data: { datasets }, options: opts });
+    },
+  };
+}

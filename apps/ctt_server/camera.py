@@ -211,6 +211,7 @@ class Picamera2Camera:
             'exposure': int(md.get('ExposureTime', 0)),
             'gain': round(float(md.get('AnalogueGain', 0.0)), 3),
             'colour_temp': int(md.get('ColourTemperature', 0)),
+            'colour_gains': [round(float(g), 3) for g in md.get('ColourGains', (0.0, 0.0))],
             'lux': round(float(md.get('Lux', 0.0)), 1),
             'focus_fom': int(md.get('FocusFoM', 0)),  # focus figure of merit (higher = sharper)
             'ev': round(self._ev, 2),
@@ -246,6 +247,11 @@ class Picamera2Camera:
             new['FrameDurationLimits'] = self._frame_duration_limits()
         if 'awb' in controls:
             new['AwbEnable'] = bool(controls['awb'])
+        if controls.get('colour_gains') is not None:
+            # Explicit gains imply manual white balance.
+            r_gain, b_gain = controls['colour_gains']
+            new['AwbEnable'] = False
+            new['ColourGains'] = (float(r_gain), float(b_gain))
         if new:
             self._picam2.set_controls(new)
             time.sleep(0.3)  # let the pipeline apply the new controls
@@ -302,6 +308,35 @@ class Picamera2Camera:
         if not ok:
             raise CameraError('Failed to encode PNG')
         return buf.tobytes()
+
+    def capture_still_frames(self, frames: int) -> list:
+        """Capture a burst of full-resolution processed frames as arrays.
+
+        Returns the ISP-processed main-stream frames (BGR-ordered, cv2 native)
+        unencoded: JPEG quantisation and the preview stream's downscale both
+        destroy fine-grain noise statistics, so measurement flows (e.g. the
+        sharpen sweep) need the full-resolution arrays directly. Switches to a
+        still mode once for the whole burst, like capture_burst.
+        """
+        frames = max(1, min(int(frames), 8))  # full-res frames are ~35 MB each
+        out = []
+        with self._lock:
+            still = self._picam2.create_still_configuration(
+                main={'size': self.resolution, 'format': 'RGB888'},
+                sensor=self._sensor_config(),
+                transform=self._transform(),
+            )
+            self._picam2.switch_mode(still)
+            try:
+                for _ in range(frames):
+                    request = self._picam2.capture_request()
+                    try:
+                        out.append(request.make_array('main').copy())
+                    finally:
+                        request.release()
+            finally:
+                self._picam2.switch_mode(self._video_config())
+        return out
 
     def mjpeg_frames(self, fps: float = 10.0):
         """Yield multipart MJPEG chunks for a streaming HTTP response."""
