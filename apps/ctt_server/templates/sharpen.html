@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Sharpen · {{ project.name }}{% endblock %}
+{% block body %}
+{% set active_tab = 'sharpen' %}
+{% include '_project_tabs.html' %}
+
+<!-- Sharpen threshold tuning: sweeps rpi.sharpen.threshold over temp tunings
+     and measures noise amplification on the Macbeth grey patches. -->
+<div class="grid" x-data='sharpenApp({ project: {{ project.name|tojson }} })' x-init="init()">
+
+  <div class="card">
+    <div class="card-head">
+      <h2>Sharpen threshold</h2>
+      <span class="chip" x-show="running" x-cloak
+            x-text="progress.total ? 'point ' + progress.index + '/' + progress.total : 'running'"></span>
+    </div>
+    <div class="banner error" x-show="error" x-text="error" x-cloak></div>
+    <p class="hint" style="margin-top:0">Finds the smallest sharpening threshold that does not amplify sensor
+      noise: the sweep captures the Macbeth chart with sharpening disabled, then at each candidate threshold,
+      and compares the spatial noise on the grey (bottom-row) patches. Frame the chart on the Capture tab
+      first — static and steadily lit (a lightbox works well). Each point reloads the camera with a modified
+      tuning, so the preview will blink and a run takes a few minutes.</p>
+
+    <div class="field-row" style="align-items:flex-start; max-width:760px">
+      <div class="field" style="margin-bottom:0">
+        <label>Gain</label>
+        <input type="number" x-model.number="gain" min="1" max="64" step="0.5">
+        <div class="hint">Analogue gain to measure at — high enough that noise is clearly visible.
+          The stored threshold is a compromise: tuned here, softer below, noisier above.</div>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label>Frames</label>
+        <input type="number" x-model.number="frames" min="1" max="8" step="1">
+        <div class="hint">Frames averaged per point.</div>
+      </div>
+      <div class="field" style="margin-bottom:0; flex: 2">
+        <label>Thresholds</label>
+        <input type="text" x-model="thresholds">
+        <div class="hint">Candidate thresholds, low to high (the tuning default is 0.75).</div>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label>Tolerance</label>
+        <input type="number" x-model.number="tolerance" min="1" max="2" step="0.01">
+        <div class="hint">Acceptable noise ratio vs sharpening off.</div>
+      </div>
+    </div>
+
+    <div class="field-row mt" style="align-items:center; gap:14px">
+      <button class="btn primary" :disabled="running" @click="run()">
+        <span x-text="running ? 'Sweeping…' : '▶ Run sweep'"></span>
+      </button>
+      <span class="hint" style="margin:0" x-show="base" x-cloak>
+        Base tuning: <b x-text="base && base.name"></b>
+        (<span x-text="base && (base.kind === 'generated' ? 'this project' : 'system')"></span>)
+      </span>
+    </div>
+
+    <div class="console" style="height: 160px; margin-top: 14px" x-show="log.length" x-cloak>
+      <div x-ref="console">
+        <template x-for="(line, i) in log" :key="i">
+          <div class="ln" x-text="line"></div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results: the curve, the recommendation, and the apply action -->
+  <div class="card" x-show="results || livePoints.length" x-cloak>
+    <div class="card-head">
+      <h2>Noise amplification</h2>
+      <button class="btn sm ghost" x-show="points.length" x-cloak @click="showPoints = !showPoints"
+              x-text="showPoints ? 'Hide points' : 'Show points'"></button>
+    </div>
+
+    <div class="banner info" x-show="recommended && recommended.threshold !== null" x-cloak>
+      Recommended threshold: <b x-text="recommended && recommended.threshold"></b>
+      (noise ratio <span x-text="recommended && recommended.aggregate && recommended.aggregate.toFixed(3)"></span>)
+      <template x-if="canApply">
+        <button class="btn sm primary" style="margin-left:10px" :disabled="applying" @click="apply()">
+          <span x-text="applying ? 'Applying…' : (applied ? 'Re-apply' : 'Apply to tuning')"></span>
+        </button>
+      </template>
+      <span class="hint" x-show="!canApply" style="margin-left:10px">Run CTT first to have a tuning file to apply it to.</span>
+      <span class="chip cac" x-show="applied" x-cloak style="margin-left:10px"
+            x-text="applied && ('applied ' + applied.threshold)"></span>
+    </div>
+    <div class="banner error" x-show="recommended && recommended.threshold === null" x-cloak>
+      <span x-text="recommended && recommended.reason"></span>
+    </div>
+
+    <div class="chart-box"><canvas id="sharpenChart"></canvas></div>
+    <p class="hint">Spatial noise on each grey patch relative to the sharpen-disabled baseline (1.0 = no
+      amplification), against the threshold on a log axis. Low thresholds sharpen the noise itself; the
+      recommended value is the smallest that stays within tolerance, keeping the most real-detail
+      sharpening. Patch 1 is white, patch 6 black.</p>
+    <div class="hint" x-show="warnings.length" x-cloak>
+      <template x-for="w in warnings"><div x-text="'⚠ ' + w"></div></template>
+    </div>
+
+    <table x-show="showPoints" x-cloak style="margin-top:10px">
+      <thead><tr>
+        <th>Threshold</th>
+        <template x-for="i in 6"><th x-text="'Patch ' + i"></th></template>
+        <th>Median</th>
+      </tr></thead>
+      <tbody>
+        <template x-for="p in points" :key="p.threshold">
+          <tr>
+            <td class="mono" x-text="p.threshold"></td>
+            <template x-for="r in p.ratios"><td class="mono" x-text="r.toFixed(3)"></td></template>
+            <td class="mono" x-text="p.aggregate.toFixed(3)"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+    <div class="hint mt" x-show="settings" x-cloak>
+      <span x-text="settings && ('Measured at gain ' + settings.gain + ' · ' + settings.exposure_us + ' µs · '
+                    + settings.frames + ' frame(s) per point · base ' + (results.base_tuning && results.base_tuning.name)
+                    + ' · ' + results.generated_at)"></span>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/alpine.min.js') }}" defer></script>
+{% endblock %}

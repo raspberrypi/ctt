@@ -216,6 +216,38 @@ vertical/horizontal.
 
 <img src="images/mtf.png" alt="MTF tab with detected slanted-edge regions and MTF curves" width="50%">
 
+## Sharpen threshold tuning
+
+The Sharpen tab tunes the `rpi.sharpen` `threshold` value empirically. The
+threshold is the sharpening block's noise gate: local luminance steps below it
+are treated as noise and left alone, steps above it get sharpened. Too low and
+flat areas visibly crunch with amplified sensor noise; too high and fine real
+detail loses its sharpening. Nothing in the pipeline adapts the value to
+analogue gain, so it has to be chosen against real captures.
+
+1. **Frame the chart** — point the camera at a Macbeth chart, static and
+   steadily lit (a lightbox works well), on the Capture tab.
+2. **Pick the gain** — the sweep measures at one fixed analogue gain
+   (default 8×), high enough that sensor noise is clearly visible. The stored
+   threshold is a compromise across gains: tuned at this gain, images are
+   slightly softer below it and slightly noisier above it.
+3. **Run the sweep** — the camera is reloaded with a temporary tuning per
+   point: first with sharpening disabled (the baseline), then with each
+   candidate threshold. At every point the grey (bottom-row) patches are
+   sampled from full-resolution processed captures and their spatial noise is
+   compared against the baseline. The preview blinks on each reload; a run
+   takes a few minutes. The camera's tuning and controls are restored
+   afterwards.
+4. **Read the curve** — the chart plots per-patch and median noise
+   amplification (1.0 = no amplification) against threshold on a log axis.
+   The recommended value is the smallest threshold whose median stays within
+   the tolerance (default 1.05) — the most real-detail sharpening without
+   amplifying noise.
+5. **Apply** — writes the recommended threshold into the project's generated
+   tuning file for the live ISP platform (once a CTT run exists). Results
+   persist in `<project>/sharpen/results.json`, which calibration runs never
+   scan — the same isolation as `<project>/mtf/`.
+
 ## HTTP API
 
 The web UI is driven by a JSON-over-HTTPS API on the same port, which can also
@@ -306,3 +338,11 @@ tagging or sweeping against a bad reading. The web UI shows out-of-range values 
 | GET | `/projects/<name>/mtf/preview` | The captured chart's preview JPEG |
 | POST | `/projects/<name>/mtf/auto` | Auto-detect slanted-edge regions; returns `{"rois": [...]}` |
 | POST | `/projects/<name>/mtf/measure` | Measure `{"rois": [{x, y, w, h}, ...]}`; returns MTF curves and MTF50 per region |
+
+### Sharpen
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/projects/<name>/sharpen/data` | Stored sweep results plus context: `{results, target, base, can_apply, running}` |
+| GET | `/projects/<name>/sharpen/sweep/stream` | Run a threshold sweep, streaming progress as Server-Sent Events. Query: `gain` (default 8), `frames` (1-8), `thresholds` (comma list), `tolerance`. Events: `start`, `log`, `chart`, `baseline`, `point`, then `done` (or `error`) |
+| POST | `/projects/<name>/sharpen/apply` | Write `{"threshold": t}` into the project's generated tuning's `rpi.sharpen` block (400 before a CTT run exists) |
