@@ -232,6 +232,15 @@ captures.
 Too low and flat areas visibly crunch with amplified sensor noise; too high
 and fine real detail loses its sharpening.
 
+Settings:
+
+| Setting | Default | What it does |
+|---------|---------|--------------|
+| Gain | 8 | Analogue gain the sweep measures at — deliberately **high**, so sensor noise is clearly visible and the metric can detect the candidate at which the gate starts letting noise through. The stored threshold is a compromise across gains: tuned here, images are slightly softer below this gain and slightly noisier above it. |
+| Frames | 4 | Captures averaged per point, tightening the noise measurement. The strength sweep reuses this value. |
+| Thresholds | 0.02 – 4.0 | Candidate values, roughly geometrically spaced: the threshold scales the hardware noise gate linearly, so geometric steps sample its response evenly. Bracket the template default (0.75) generously. |
+| Tolerance | 1.15 | Acceptable grey-patch noise ratio vs sharpening-off. 1.15 absorbs the metric's own 5–10% run-to-run scatter, and at the high measurement gain the extra noise hides in the noise already present — whereas a tighter tolerance systematically over-gates, losing real detail at **every** gain (measured: 1.05 pushed the threshold to 1.5 and left sharpening nothing to work on). |
+
 1. **Frame the chart** — point the camera at a Macbeth chart, static and
    steadily lit (a lightbox works well), on the Capture tab.
 2. **Pick the gain** — the sweep measures at one fixed analogue gain
@@ -258,6 +267,21 @@ and fine real detail loses its sharpening.
    scan — the same isolation as `<project>/mtf/`.
 
 ### Strength and limit (edge sharpening and halos)
+
+Settings:
+
+| Setting | Default | What it does |
+|---------|---------|--------------|
+| Gain | 1 | The mirror image of the threshold sweep: **low** gain is the worst case for halos — with little noise, denoise barely intervenes and sharpening acts at full force. Values chosen at high gain measure tame yet visibly oversharpen at low gain. |
+| Strengths | 0.25 – 2.0 | Candidate strengths, linearly spaced (strength scales the filter responses linearly), bracketing the template default 1.0. Each is measured on the moderate-contrast edges and the faint-texture tiles. |
+| Limits | 0.125 – 2.0 | Candidate delta caps, geometrically spaced around the template default 0.5, swept at the recommended strength on the high-contrast edges — the only place the cap engages. The largest within the halo cap is recommended. |
+| Halo cap (%) | 5 | Acceptance bar for edge over/undershoot, measured as growth over the baseline as a % of the edge step. Calibrated against perception: 5% reads as a clean, subtle crispening; ~10% is already punchy. In practice this is the binding constraint on both phases. |
+| MTF peak cap | 1.5 | Ceiling on the maximum of the DC-normalised frequency response (above 1.0 = over-unity, i.e. visibly "crisped"). The pleasant default-strength look measures ~1.4; the cap exists only to reject genuinely crunchy response the halo cap might miss. |
+
+Two behaviours are fixed by design rather than settings: every strength
+point is measured at a **reference limit** of 1.0 (see below), and the
+recommended strength must hold its **texture gain** within 5% of the best
+in-cap candidate's (the texture floor).
 
 Tune and apply the threshold first, then run the strength sweep from the
 second card. It measures at **low gain** (default 1×) — the mirror image of
