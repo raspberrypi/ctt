@@ -270,9 +270,15 @@ ISO 12233 / eSFR chart (the same target as the MTF tab) is ideal, since its
 standard edges are **moderate contrast** (driving the strength choice) and
 its registration marks give the strong black/white edges the limit choice
 needs; a printed slanted-edge card works too. Keep the Macbeth chart in the
-scene if you can. The sweep captures a sharpening-off
-baseline, locks the edges it finds (classified by contrast), then per
-candidate strength measures on the moderate edge:
+scene if you can, and include a finely textured object (newspaper, fabric,
+yarn) — faint texture is measured per point and anchors the strength
+recommendation. The sweep captures a sharpening-off
+baseline, locks the edges it finds (classified by contrast), auto-selects
+faint-texture tiles, then per candidate strength measures (every strength
+point is written with a fixed **reference limit** of 1.0, so the base
+tuning's own limit never steers the phase — an inherited limit measures
+different halos depending on the file's starting state, and each start
+converges to its own self-consistent corner):
 
 - **acutance gain** — perceived sharpness gained over the baseline: the
   contrast-sensitivity-weighted area under the MTF curve, which follows the
@@ -284,7 +290,12 @@ candidate strength measures on the moderate edge:
   step, measured as *growth over the baseline's own profile* (a printed edge
   can carry static structure that reads as a constant halo; only what
   sharpening adds counts). The hardware deliberately applies more negative
-  than positive gain, so undershoot usually leads.
+  than positive gain, so undershoot usually leads;
+- **texture gain** — the growth in high-frequency energy on faint-texture
+  tiles auto-selected from the baseline (energy comfortably above the noise
+  floor but faint in absolute terms, with no strong edge through the tile).
+  Faint texture is the one thing the strength alone renders — its deltas sit
+  below any limit — and it never enters the edge-based acutance metric.
 
 The recommended strength is the one with the **greatest acutance gain**
 whose worse halo stays within the halo cap (default 5% — a clean, subtle crispening; ~10% reads as punchy) *and* whose MTF
@@ -293,6 +304,10 @@ measures ~1.4 and reads as crisp, not crunchy) — maximum perceived sharpness
 without visible halos. (The gain need not rise with strength: the threshold
 gates responses and the limit clips them, so the curve can flatten or fall;
 on a monotonic curve this degenerates to the largest acceptable strength.)
+A candidate must also hold its **texture gain within 5% of the best in-cap
+point's**: without this floor the pick can collapse to a weak strength that
+draws crisp edges but soft newsprint and fabric. When the scene has no
+faint-texture region the floor disengages with a warning.
 At that strength the sweep then
 steps the limit, measuring halos on the high-contrast edge (the only place
 the delta cap engages), and recommends the largest limit within the halo cap.
