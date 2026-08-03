@@ -2691,31 +2691,62 @@ function characterisationApp(cfg) {
 function sharpenApp(cfg) {
   return {
     project: cfg.project,
-    results: null,        // persisted results.json contents (or null)
+    results: null,        // persisted results.json (v2: {threshold, strength} sections)
     base: null,           // tuning a sweep would start from {kind, name}
     canApply: false,      // a generated tuning exists for the live target
-    running: false,
+    running: false,       // shared: one sweep (of either kind) at a time
     applying: false,
     error: '',
     source: null,
     chart: null,
+    strengthChart: null,
+    limitChart: null,
     showPoints: false,
+    showStrengthPoints: false,
     log: [],
+    strengthLog: [],
     progress: { index: 0, total: 0 },
-    livePoints: [],       // points streamed by the current run (chart updates live)
-    // Sweep settings (defaults mirror the server's).
+    livePoints: [],          // threshold points streamed by the current run
+    liveStrengthPoints: [],  // strength-phase points streamed by the current run
+    liveLimitPoints: [],     // limit-phase points streamed by the current run
+    // Threshold sweep settings (defaults mirror the server's).
     gain: 8,
     frames: 4,
     thresholds: '0.02, 0.05, 0.1, 0.2, 0.4, 0.75, 1.5, 2.5, 4.0',
-    tolerance: 1.05,
+    tolerance: 1.15,
+    // Strength/limit sweep settings. Low gain is the halo worst case (the
+    // opposite of the threshold sweep's high gain): denoise barely
+    // intervenes there and sharpening acts at full force.
+    sGain: 1,
+    strengths: '0.25, 0.5, 0.75, 1, 1.25, 1.5, 2',
+    limits: '0.125, 0.25, 0.5, 1, 2',
+    overshootCap: 5,     // percent in the UI, fraction on the wire
+    peakCap: 1.5,
 
-    get recommended() { return (this.results && this.results.recommended) || null; },
-    get points() { return (this.results && this.results.points) || []; },
-    get applied() { return (this.results && this.results.applied) || null; },
-    get settings() { return (this.results && this.results.settings) || null; },
+    get thresholdResults() { return (this.results && this.results.threshold) || null; },
+    get strengthResults() { return (this.results && this.results.strength) || null; },
+    // Threshold section accessors (feed the first card).
+    get recommended() { return (this.thresholdResults && this.thresholdResults.recommended) || null; },
+    get points() { return (this.thresholdResults && this.thresholdResults.points) || []; },
+    get applied() { return (this.thresholdResults && this.thresholdResults.applied) || null; },
+    get settings() { return (this.thresholdResults && this.thresholdResults.settings) || null; },
     get warnings() {
-      const run = (this.results && this.results.warnings) || [];
+      const run = (this.thresholdResults && this.thresholdResults.warnings) || [];
       const perPoint = this.points.flatMap((p) => (p.warnings || []).map((w) => `threshold ${p.threshold}: ${w}`));
+      return run.concat(perPoint);
+    },
+    // Strength section accessors (feed the second card).
+    get sRecommended() { return (this.strengthResults && this.strengthResults.recommended) || null; },
+    get sRecommendedLimit() { return (this.strengthResults && this.strengthResults.recommended_limit) || null; },
+    get sPoints() { return (this.strengthResults && this.strengthResults.points) || []; },
+    get sLimitPoints() { return (this.strengthResults && this.strengthResults.limit_points) || []; },
+    get sApplied() { return (this.strengthResults && this.strengthResults.applied) || null; },
+    get sSettings() { return (this.strengthResults && this.strengthResults.settings) || null; },
+    get sWarnings() {
+      const run = (this.strengthResults && this.strengthResults.warnings) || [];
+      const perPoint = this.sPoints
+        .concat(this.sLimitPoints)
+        .flatMap((p) => (p.warnings || []).map((w) => `${p.strength != null ? 'strength ' + p.strength : 'limit ' + p.limit}: ${w}`));
       return run.concat(perPoint);
     },
 
@@ -2739,7 +2770,18 @@ function sharpenApp(cfg) {
           this.tolerance = this.settings.tolerance;
           this.thresholds = this.settings.thresholds.join(', ');
         }
-        this.$nextTick(() => this.render(this.points));
+        if (this.sSettings) {
+          this.sGain = this.sSettings.gain;
+          this.strengths = this.sSettings.strengths.join(', ');
+          this.limits = this.sSettings.limits.join(', ');
+          this.overshootCap = Math.round(this.sSettings.overshoot_cap * 100);
+          this.peakCap = this.sSettings.peak_cap;
+        }
+        this.$nextTick(() => {
+          this.render(this.points);
+          this.renderStrength(this.sPoints);
+          this.renderLimit(this.sLimitPoints);
+        });
       } catch (e) { this.error = 'Failed to load sharpen data'; }
     },
 
@@ -2765,19 +2807,19 @@ function sharpenApp(cfg) {
       switch (ev.event) {
         case 'start':
           this.progress.total = ev.total;
-          this.pushLog(`sweep started: ${ev.thresholds.length} thresholds at gain ${ev.gain}, `
+          this.pushLog(this.log, `sweep started: ${ev.thresholds.length} thresholds at gain ${ev.gain}, `
             + `base tuning ${ev.base.name} (${ev.base.kind})`);
           break;
-        case 'log': this.pushLog(ev.line); break;
-        case 'chart': this.pushLog(`chart located (confidence ${ev.confidence})`); break;
+        case 'log': this.pushLog(this.log, ev.line); break;
+        case 'chart': this.pushLog(this.log, `chart located (confidence ${ev.confidence})`); break;
         case 'baseline':
           this.progress.index = ev.index + 1;
-          this.pushLog(`baseline captured: patch noise ${ev.patch_noise.map((n) => n.toFixed(2)).join(', ')}`);
+          this.pushLog(this.log, `baseline captured: patch noise ${ev.patch_noise.map((n) => n.toFixed(2)).join(', ')}`);
           break;
         case 'point':
           this.progress.index = ev.index + 1;
           this.livePoints.push(ev);
-          this.pushLog(`threshold ${ev.threshold}: noise ratio ${ev.aggregate.toFixed(3)}`);
+          this.pushLog(this.log, `threshold ${ev.threshold}: noise ratio ${ev.aggregate.toFixed(3)}`);
           this.$nextTick(() => this.render(this.livePoints));
           break;
         case 'error': this.error = ev.error; this.finish(); break;
@@ -2785,12 +2827,74 @@ function sharpenApp(cfg) {
       }
     },
 
-    pushLog(line) {
-      this.log.push(line);
-      if (this.log.length > 200) this.log.shift();
+    runStrength() {
+      if (this.running) return;
+      this.running = true;
+      this.error = '';
+      this.strengthLog = [];
+      this.liveStrengthPoints = [];
+      this.liveLimitPoints = [];
+      this.progress = { index: 0, total: 0 };
+      const params = new URLSearchParams({
+        gain: this.sGain, frames: this.frames,
+        strengths: this.strengths, limits: this.limits,
+        overshoot_cap: this.overshootCap / 100, peak_cap: this.peakCap,
+      });
+      this.source = new EventSource(`/projects/${this.project}/sharpen/strength/stream?${params}`);
+      this.source.onmessage = (e) => this.onStrengthEvent(JSON.parse(e.data));
+      this.source.onerror = () => {
+        if (this.running) { this.error = 'Sweep stream interrupted'; this.finish(); }
+      };
+    },
+
+    onStrengthEvent(ev) {
+      switch (ev.event) {
+        case 'start':
+          this.progress.total = ev.total;
+          this.pushLog(this.strengthLog, `sweep started: ${ev.strengths.length} strengths + ${ev.limits.length} limits `
+            + `at gain ${ev.gain}, base tuning ${ev.base.name} (${ev.base.kind})`);
+          break;
+        case 'log': this.pushLog(this.strengthLog, ev.line); break;
+        case 'edges': {
+          const classes = ev.edges.map((e) => e.contrast_class || 'weak').join(', ');
+          this.pushLog(this.strengthLog, `${ev.count} edge(s) locked (${classes})`);
+          break;
+        }
+        case 'baseline':
+          this.progress.index = ev.index + 1;
+          this.pushLog(this.strengthLog, `baseline captured: MTF50 ${ev.mtf50}`);
+          break;
+        case 'point':
+          this.progress.index = ev.index + 1;
+          if (ev.phase === 'limit') {
+            this.liveLimitPoints.push(ev);
+            this.pushLog(this.strengthLog, `limit ${ev.limit}: overshoot ${this.fmtPct(ev.overshoot)}, `
+              + `undershoot ${this.fmtPct(ev.undershoot)}`);
+            this.$nextTick(() => this.renderLimit(this.liveLimitPoints));
+          } else {
+            this.liveStrengthPoints.push(ev);
+            this.pushLog(this.strengthLog, `strength ${ev.strength}: acutance x${ev.acutance_gain ?? '—'}, `
+              + `MTF50 x${ev.mtf50_boost ?? '—'}, peak ${ev.mtf_peak ?? '—'}, overshoot ${this.fmtPct(ev.overshoot)}`
+              + (ev.noise_aggregate != null ? `, noise ratio ${ev.noise_aggregate.toFixed(3)}` : ''));
+            this.$nextTick(() => this.renderStrength(this.liveStrengthPoints));
+          }
+          break;
+        case 'error': this.error = ev.error; this.finish(); break;
+        case 'done': this.finish(); this.load(); break;
+      }
+    },
+
+    fmtPct(v) { return v == null ? '—' : (v * 100).toFixed(1) + '%'; },
+
+    pushLog(log, line) {
+      log.push(line);
+      if (log.length > 200) log.shift();
       this.$nextTick(() => {
-        const box = this.$refs.console && this.$refs.console.closest('.console');
-        if (box) box.scrollTop = box.scrollHeight;
+        const boxes = [this.$refs.console, this.$refs.strengthConsole];
+        for (const el of boxes) {
+          const box = el && el.closest('.console');
+          if (box) box.scrollTop = box.scrollHeight;
+        }
       });
     },
 
@@ -2799,20 +2903,34 @@ function sharpenApp(cfg) {
       if (this.source) { this.source.close(); this.source = null; }
     },
 
-    async apply() {
-      if (!this.recommended || this.recommended.threshold === null) return;
+    async apply(values) {
       this.applying = true;
       this.error = '';
       try {
         const r = await fetch(`/projects/${this.project}/sharpen/apply`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ threshold: this.recommended.threshold }),
+          body: JSON.stringify(values),
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || 'apply failed');
         await this.load();
       } catch (e) { this.error = e.message; }
       this.applying = false;
+    },
+
+    applyThreshold() {
+      if (this.recommended && this.recommended.threshold !== null) {
+        this.apply({ threshold: this.recommended.threshold });
+      }
+    },
+
+    applyStrength() {
+      if (!this.sRecommended || this.sRecommended.strength === null) return;
+      const values = { strength: this.sRecommended.strength };
+      if (this.sRecommendedLimit && this.sRecommendedLimit.limit !== null) {
+        values.limit = this.sRecommendedLimit.limit;
+      }
+      this.apply(values);
     },
 
     // Noise amplification vs threshold: six thin per-patch traces (white→black
@@ -2851,6 +2969,85 @@ function sharpenApp(cfg) {
       const opts = chartOpts('Sharpen threshold', 'Grey-patch noise ÷ baseline');
       opts.scales.x.type = 'logarithmic';
       this.chart = new Chart(canvas.getContext('2d'), { data: { datasets }, options: opts });
+    },
+
+    // Sharpness vs strength: MTF50 boost and MTF peak on the left axis, halo
+    // percentages on the right, the halo cap dashed, the recommended point
+    // ringed. Linear x — strengths are linearly spaced.
+    renderStrength(points) {
+      const canvas = document.getElementById('strengthChart');
+      if (!canvas || !points.length) return;
+      if (this.strengthChart) { this.strengthChart.destroy(); this.strengthChart = null; }
+      const pts = [...points].sort((a, b) => a.strength - b.strength);
+      const cap = (this.sSettings ? this.sSettings.overshoot_cap : this.overshootCap / 100) * 100;
+      const datasets = [
+        { label: 'acutance ÷ baseline', type: 'line', borderColor: '#f06595', backgroundColor: '#f06595',
+          borderWidth: 3, pointRadius: 4, yAxisID: 'y',
+          data: pts.map((p) => ({ x: p.strength, y: p.acutance_gain })) },
+        { label: 'MTF50 ÷ baseline', type: 'line', borderColor: '#d0bfff', backgroundColor: '#d0bfff',
+          borderWidth: 1, pointRadius: 2, yAxisID: 'y',
+          data: pts.map((p) => ({ x: p.strength, y: p.mtf50_boost })) },
+        { label: 'MTF peak', type: 'line', borderColor: '#ffd8a8', backgroundColor: '#ffd8a8',
+          borderWidth: 1, pointRadius: 2, yAxisID: 'y',
+          data: pts.map((p) => ({ x: p.strength, y: p.mtf_peak })) },
+        { label: 'overshoot %', type: 'line', borderColor: '#a5d8ff', backgroundColor: '#a5d8ff',
+          borderWidth: 2, pointRadius: 3, yAxisID: 'y2',
+          data: pts.map((p) => ({ x: p.strength, y: p.overshoot != null ? p.overshoot * 100 : null })) },
+        { label: 'undershoot %', type: 'line', borderColor: '#74c0fc', backgroundColor: '#74c0fc',
+          borderWidth: 1, pointRadius: 2, yAxisID: 'y2', borderDash: [3, 3],
+          data: pts.map((p) => ({ x: p.strength, y: p.undershoot != null ? p.undershoot * 100 : null })) },
+        { label: 'halo cap', type: 'line', borderColor: '#9aa7b8', borderDash: [6, 4],
+          borderWidth: 1, pointRadius: 0, yAxisID: 'y2',
+          data: [pts[0], pts[pts.length - 1]].map((p) => ({ x: p.strength, y: cap })) },
+      ];
+      const rec = this.sRecommended;
+      if (rec && rec.strength !== null) {
+        datasets.push({
+          label: 'recommended', type: 'scatter', pointRadius: 8, pointStyle: 'circle',
+          borderColor: '#b2f2bb', backgroundColor: 'transparent', borderWidth: 3, yAxisID: 'y',
+          data: [{ x: rec.strength, y: rec.acutance_gain }],
+        });
+      }
+      const opts = chartOpts('Sharpen strength', 'Sharpness ÷ baseline');
+      opts.scales.x.type = 'linear';
+      opts.scales.y2 = {
+        position: 'right',
+        title: { display: true, text: 'Halo growth (% of edge step)', color: '#6b7888' },
+        ticks: { color: '#6b7888' },
+        grid: { drawOnChartArea: false },
+      };
+      this.strengthChart = new Chart(canvas.getContext('2d'), { data: { datasets }, options: opts });
+    },
+
+    // Halo vs limit on the high-contrast edge, log x (limits are geometric).
+    renderLimit(points) {
+      const canvas = document.getElementById('limitChart');
+      if (!canvas || !points.length) return;
+      if (this.limitChart) { this.limitChart.destroy(); this.limitChart = null; }
+      const pts = [...points].sort((a, b) => a.limit - b.limit);
+      const cap = (this.sSettings ? this.sSettings.overshoot_cap : this.overshootCap / 100) * 100;
+      const datasets = [
+        { label: 'overshoot %', type: 'line', borderColor: '#a5d8ff', backgroundColor: '#a5d8ff',
+          borderWidth: 2, pointRadius: 3,
+          data: pts.map((p) => ({ x: p.limit, y: p.overshoot != null ? p.overshoot * 100 : null })) },
+        { label: 'undershoot %', type: 'line', borderColor: '#74c0fc', backgroundColor: '#74c0fc',
+          borderWidth: 1, pointRadius: 2, borderDash: [3, 3],
+          data: pts.map((p) => ({ x: p.limit, y: p.undershoot != null ? p.undershoot * 100 : null })) },
+        { label: 'halo cap', type: 'line', borderColor: '#9aa7b8', borderDash: [6, 4],
+          borderWidth: 1, pointRadius: 0,
+          data: [pts[0], pts[pts.length - 1]].map((p) => ({ x: p.limit, y: cap })) },
+      ];
+      const rec = this.sRecommendedLimit;
+      if (rec && rec.limit !== null) {
+        datasets.push({
+          label: 'recommended', type: 'scatter', pointRadius: 8, pointStyle: 'circle',
+          borderColor: '#b2f2bb', backgroundColor: 'transparent', borderWidth: 3,
+          data: [{ x: rec.limit, y: rec.overshoot * 100 }],
+        });
+      }
+      const opts = chartOpts('Sharpen limit', 'Halo growth (% of edge step)');
+      opts.scales.x.type = 'logarithmic';
+      this.limitChart = new Chart(canvas.getContext('2d'), { data: { datasets }, options: opts });
     },
   };
 }

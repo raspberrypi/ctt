@@ -14,12 +14,17 @@ import json
 import numpy as np
 
 from ctt_server.sharpen import (
+    DEFAULT_OVERSHOOT_CAP,
+    DEFAULT_PEAK_CAP,
     DEFAULT_TOLERANCE,
     GREY_SLICE,
+    classify_edges,
     grey_patch_noise,
     patch_luma,
     patch_spatial_noise,
     patch_window_half,
+    recommend_limit,
+    recommend_strength,
     recommend_threshold,
     set_sharpen,
 )
@@ -119,6 +124,107 @@ class TestRecommendThreshold:
         assert 'tolerance' in out['reason']
 
 
+class TestRecommendStrength:
+    def points(self, rows):
+        return [
+            {'strength': s, 'overshoot': o, 'undershoot': u, 'mtf_peak': p, 'acutance_gain': 1.0, 'mtf50_boost': 1.0}
+            for s, o, u, p in rows
+        ]
+
+    def test_picks_largest_within_both_caps(self):
+        points = self.points([(0.5, 0.02, 0.03, 1.05), (1.0, 0.05, 0.08, 1.15), (2.0, 0.2, 0.3, 1.5)])
+        assert recommend_strength(points, 0.10, 1.25)['strength'] == 1.0
+        # The calibrated default cap (5%) is stricter and drops to 0.5.
+        assert recommend_strength(points, DEFAULT_OVERSHOOT_CAP, DEFAULT_PEAK_CAP)['strength'] == 0.5
+
+    def test_peak_cap_alone_rejects(self):
+        # Halo fine, but the MTF peak betrays over-crisping.
+        points = self.points([(0.5, 0.02, 0.02, 1.1), (1.0, 0.04, 0.04, 1.4)])
+        assert recommend_strength(points, 0.10, 1.25)['strength'] == 0.5
+
+    def test_worse_halo_side_gates(self):
+        # Undershoot (the stronger negative gain) breaches the cap alone.
+        points = self.points([(1.0, 0.05, 0.15, 1.1)])
+        assert recommend_strength(points, 0.10, 1.25)['strength'] is None
+
+    def test_exactly_at_caps_accepted(self):
+        points = self.points([(1.0, 0.10, 0.05, 1.25)])
+        assert recommend_strength(points, 0.10, 1.25)['strength'] == 1.0
+
+    def test_unmeasured_points_skipped(self):
+        points = self.points([(0.5, 0.02, 0.02, 1.05)]) + [
+            {'strength': 1.0, 'overshoot': None, 'undershoot': None, 'mtf_peak': None, 'acutance_gain': None}
+        ]
+        assert recommend_strength(points, 0.10, 1.25)['strength'] == 0.5
+
+    def test_none_within_caps(self):
+        out = recommend_strength(self.points([(0.5, 0.2, 0.2, 1.5)]), 0.10, 1.25)
+        assert out['strength'] is None
+        assert 'cap' in out['reason']
+
+    def test_non_monotonic_gain_picks_highest(self):
+        # The threshold gate and limit clipping can make sharpness FALL with
+        # strength; the recommendation must follow the measured acutance
+        # gain, not assume more strength = sharper.
+        points = [
+            {'strength': 0.25, 'overshoot': 0.02, 'undershoot': 0.03, 'mtf_peak': 1.05, 'acutance_gain': 1.3},
+            {'strength': 1.0, 'overshoot': 0.04, 'undershoot': 0.05, 'mtf_peak': 1.06, 'acutance_gain': 1.15},
+            {'strength': 2.0, 'overshoot': 0.05, 'undershoot': 0.06, 'mtf_peak': 1.06, 'acutance_gain': 1.08},
+        ]
+        out = recommend_strength(points, 0.10, 1.25)
+        assert out['strength'] == 0.25
+        assert out['acutance_gain'] == 1.3
+
+
+class TestRecommendLimit:
+    def test_picks_largest_within_cap(self):
+        points = [
+            {'limit': 0.25, 'overshoot': 0.03, 'undershoot': 0.04},
+            {'limit': 0.5, 'overshoot': 0.08, 'undershoot': 0.09},
+            {'limit': 1.0, 'overshoot': 0.2, 'undershoot': 0.25},
+        ]
+        assert recommend_limit(points, 0.10)['limit'] == 0.5
+
+    def test_none_within_cap(self):
+        out = recommend_limit([{'limit': 0.25, 'overshoot': 0.3, 'undershoot': 0.3}], 0.10)
+        assert out['limit'] is None
+        assert 'cap' in out['reason']
+
+    def test_disengaged_limit_not_recommended(self):
+        # At a weak strength the delta cap never engages: halos flat across
+        # the candidates means every limit passes trivially — recommend none.
+        points = [
+            {'limit': 0.125, 'overshoot': 0.001, 'undershoot': 0.0},
+            {'limit': 0.5, 'overshoot': 0.008, 'undershoot': 0.009},
+            {'limit': 2.0, 'overshoot': 0.024, 'undershoot': 0.025},
+        ]
+        out = recommend_limit(points, 0.10)
+        assert out['limit'] == 2.0  # 2.4% spread: the limit IS engaging
+        flat = [
+            {'limit': 0.125, 'overshoot': 0.001, 'undershoot': 0.0},
+            {'limit': 2.0, 'overshoot': 0.006, 'undershoot': 0.005},
+        ]
+        out = recommend_limit(flat, 0.10)
+        assert out['limit'] is None
+        assert 'never engages' in out['reason']
+
+
+class TestClassifyEdges:
+    def edge(self, low, high):
+        return {'edge_low': low, 'edge_high': high}
+
+    def test_classification_boundaries(self):
+        edges = [
+            self.edge(10.0, 240.0),  # step 230 -> high
+            self.edge(60.0, 180.0),  # step 120 -> moderate
+            self.edge(120.0, 135.0),  # step 15 -> too shallow
+        ]
+        assert classify_edges(edges) == ['high', 'moderate', None]
+
+    def test_missing_plateaus_unclassified(self):
+        assert classify_edges([{'edge_low': None, 'edge_high': None}]) == [None]
+
+
 def v2_tuning(sharpen=None):
     algorithms = [{'rpi.black_level': {'black_level': 4096}}]
     if sharpen is not None:
@@ -154,6 +260,12 @@ class TestSetSharpen:
         block = next(e for e in tuning['algorithms'] if 'rpi.sharpen' in e)['rpi.sharpen']
         assert block['strength'] == 0.0
         assert block['threshold'] == 0.75  # untouched
+
+    def test_limit_and_combinations(self):
+        tuning = v2_tuning({'threshold': 0.75, 'limit': 0.5, 'strength': 1.0})
+        set_sharpen(tuning, strength=1.25, limit=0.25)
+        block = next(e for e in tuning['algorithms'] if 'rpi.sharpen' in e)['rpi.sharpen']
+        assert block == {'threshold': 0.75, 'limit': 0.25, 'strength': 1.25}
 
     def test_survives_json_round_trip(self):
         tuning = set_sharpen(v2_tuning({'threshold': 0.75}), threshold=0.4)
@@ -194,12 +306,17 @@ def test_sharpen_data_returns_stored_results(tmp_path):
     import ctt_server.sharpen as sharpen_mod
 
     client, proj = _client(tmp_path)
+    # A v1 (pre-sections) file must migrate on read into the threshold section.
     stored = {'version': 1, 'points': [], 'recommended': {'threshold': 0.2}}
     path = sharpen_mod.results_path(proj)
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(stored))
     data = client.get('/projects/cam/sharpen/data').get_json()
-    assert data['results']['recommended']['threshold'] == 0.2
+    assert data['results']['version'] == 2
+    assert data['results']['threshold']['recommended']['threshold'] == 0.2
+    assert data['results']['strength'] is None
+    # Migration is read-time only: the disk file stays v1.
+    assert json.loads(path.read_text())['version'] == 1
 
 
 def test_sharpen_apply_requires_generated_tuning(tmp_path, monkeypatch):
@@ -243,7 +360,40 @@ def test_sharpen_apply_writes_tuning_and_records(tmp_path, monkeypatch):
     block = next(e for e in written['algorithms'] if 'rpi.sharpen' in e)['rpi.sharpen']
     assert block['threshold'] == 0.2
     assert block['limit'] == 0.5  # untouched
-    assert json.loads(results_file.read_text())['applied']['threshold'] == 0.2
+    # The applied record lands inside the (v1-migrated) threshold section.
+    assert json.loads(results_file.read_text())['threshold']['applied']['threshold'] == 0.2
+
+
+def test_sharpen_apply_strength_and_limit(tmp_path, monkeypatch):
+    import ctt_server.app as app_mod
+    import ctt_server.sharpen as sharpen_mod
+
+    client, proj = _client(tmp_path)
+    monkeypatch.setattr(app_mod, 'platform_target', lambda: 'pisp')
+    proj.output_dir.mkdir(parents=True)
+    tuning_path = proj.output_dir / 'cam_pisp.json'
+    tuning_path.write_text(json.dumps(v2_tuning({'threshold': 0.75, 'limit': 0.5, 'strength': 1.0})))
+    results_file = sharpen_mod.results_path(proj)
+    results_file.parent.mkdir(parents=True)
+    seeded = {'version': 2, 'threshold': {'applied': None}, 'strength': {'applied': None}}
+    results_file.write_text(json.dumps(seeded))
+
+    r = client.post('/projects/cam/sharpen/apply', json={'strength': 1.25, 'limit': 0.25})
+    assert r.status_code == 200
+    block = next(e for e in json.loads(tuning_path.read_text())['algorithms'] if 'rpi.sharpen' in e)['rpi.sharpen']
+    assert block == {'threshold': 0.75, 'limit': 0.25, 'strength': 1.25}
+    stored = json.loads(results_file.read_text())
+    assert stored['strength']['applied'] == {
+        'strength': 1.25,
+        'limit': 0.25,
+        'at': stored['strength']['applied']['at'],
+    }
+    assert stored['threshold']['applied'] is None  # untouched
+
+    # Out-of-range and empty bodies are rejected.
+    assert client.post('/projects/cam/sharpen/apply', json={}).status_code == 400
+    assert client.post('/projects/cam/sharpen/apply', json={'strength': 99}).status_code == 400
+    assert client.post('/projects/cam/sharpen/apply', json={'limit': -1}).status_code == 400
 
 
 def test_sharpen_stream_refuses_while_running(tmp_path, monkeypatch):
@@ -264,3 +414,54 @@ def test_sharpen_stream_invalid_settings_streams_error(tmp_path):
     client, _ = _client(tmp_path)
     r = client.get('/projects/cam/sharpen/sweep/stream?gain=notanumber')
     assert b'invalid sweep settings' in r.data
+
+
+def test_strength_stream_refuses_while_running(tmp_path, monkeypatch):
+    import ctt_server.app as app_mod
+    import ctt_server.sharpen as sharpen_mod
+
+    client, _ = _client(tmp_path)
+    monkeypatch.setattr(app_mod, 'get_shared_camera', lambda: object())
+    assert sharpen_mod._sharpen_lock.acquire(blocking=False)
+    try:
+        r = client.get('/projects/cam/sharpen/strength/stream')
+        assert b'already running' in r.data
+    finally:
+        sharpen_mod._sharpen_lock.release()
+
+
+def test_strength_stream_invalid_settings_streams_error(tmp_path):
+    client, _ = _client(tmp_path)
+    r = client.get('/projects/cam/sharpen/strength/stream?strengths=a,b')
+    assert b'invalid sweep settings' in r.data
+
+
+def test_merge_results_preserves_other_section(tmp_path):
+    import ctt_server.sharpen as sharpen_mod
+
+    _client_unused, proj = _client(tmp_path)
+    sharpen_mod._merge_results(proj, 'threshold', {'recommended': {'threshold': 0.75}})
+    sharpen_mod._merge_results(proj, 'strength', {'recommended': {'strength': 1.0}})
+    stored = json.loads(sharpen_mod.results_path(proj).read_text())
+    assert stored['version'] == 2
+    assert stored['threshold']['recommended']['threshold'] == 0.75  # survived the strength write
+    assert stored['strength']['recommended']['strength'] == 1.0
+    # And the reverse direction.
+    sharpen_mod._merge_results(proj, 'threshold', {'recommended': {'threshold': 0.4}})
+    stored = json.loads(sharpen_mod.results_path(proj).read_text())
+    assert stored['strength']['recommended']['strength'] == 1.0
+
+
+def test_write_point_tunings_unique_files_and_kwargs(tmp_path):
+    import ctt_server.sharpen as sharpen_mod
+
+    base = tmp_path / 'base.json'
+    base.write_text(json.dumps(v2_tuning({'threshold': 0.75, 'limit': 0.5, 'strength': 1.0})))
+    tmp_dir = tmp_path / 'tmp'
+    points = [{'strength': 0.0}, {'strength': 1.5, 'limit': 0.25}]
+    paths = sharpen_mod._write_point_tunings(base, tmp_dir, points, prefix='s')
+    assert [p.name for p in paths] == ['s_0.json', 's_1.json']
+    first = json.loads(paths[0].read_text())['algorithms'][1]['rpi.sharpen']
+    second = json.loads(paths[1].read_text())['algorithms'][1]['rpi.sharpen']
+    assert first['strength'] == 0.0 and first['threshold'] == 0.75
+    assert second == {'threshold': 0.75, 'limit': 0.25, 'strength': 1.5}

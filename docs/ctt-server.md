@@ -216,14 +216,21 @@ vertical/horizontal.
 
 <img src="images/mtf.png" alt="MTF tab with detected slanted-edge regions and MTF curves" width="50%">
 
-## Sharpen threshold tuning
+## Sharpen tuning (threshold, strength and limit)
 
-The Sharpen tab tunes the `rpi.sharpen` `threshold` value empirically. The
-threshold is the sharpening block's noise gate: local luminance steps below it
-are treated as noise and left alone, steps above it get sharpened. Too low and
-flat areas visibly crunch with amplified sensor noise; too high and fine real
-detail loses its sharpening. Nothing in the pipeline adapts the value to
-analogue gain, so it has to be chosen against real captures.
+The Sharpen tab tunes the three `rpi.sharpen` scalars empirically. The
+**threshold** is the sharpening block's noise gate: local luminance steps
+below it are treated as noise and left alone, steps above it get sharpened.
+The **strength** scales the gain applied to whatever passes the gate — how
+strongly edges are boosted. The **limit** caps the delta any pixel may
+receive — the halo height on strong edges. Nothing in the pipeline adapts
+these values to analogue gain, so they have to be chosen against real
+captures.
+
+### Threshold (noise gate)
+
+Too low and flat areas visibly crunch with amplified sensor noise; too high
+and fine real detail loses its sharpening.
 
 1. **Frame the chart** — point the camera at a Macbeth chart, static and
    steadily lit (a lightbox works well), on the Capture tab.
@@ -241,12 +248,62 @@ analogue gain, so it has to be chosen against real captures.
 4. **Read the curve** — the chart plots per-patch and median noise
    amplification (1.0 = no amplification) against threshold on a log axis.
    The recommended value is the smallest threshold whose median stays within
-   the tolerance (default 1.05) — the most real-detail sharpening without
-   amplifying noise.
+   the tolerance (default 1.15 — loose enough to absorb the metric's own
+   run-to-run scatter, and at high gain the extra noise is masked by the
+   noise already present, whereas an over-gated threshold loses detail at
+   every gain) — the most real-detail sharpening without visible noise.
 5. **Apply** — writes the recommended threshold into the project's generated
    tuning file for the live ISP platform (once a CTT run exists). Results
    persist in `<project>/sharpen/results.json`, which calibration runs never
    scan — the same isolation as `<project>/mtf/`.
+
+### Strength and limit (edge sharpening and halos)
+
+Tune and apply the threshold first, then run the strength sweep from the
+second card. It measures at **low gain** (default 1×) — the mirror image of
+the threshold sweep's high gain: with little noise, denoise barely
+intervenes and sharpening acts at full force, so halos measured here are the
+worst case (values chosen at high gain look tame in the measurement and
+visibly oversharpen at low gain). It measures a slanted edge in the
+**processed** output — an
+ISO 12233 / eSFR chart (the same target as the MTF tab) is ideal, since its
+standard edges are **moderate contrast** (driving the strength choice) and
+its registration marks give the strong black/white edges the limit choice
+needs; a printed slanted-edge card works too. Keep the Macbeth chart in the
+scene if you can. The sweep captures a sharpening-off
+baseline, locks the edges it finds (classified by contrast), then per
+candidate strength measures on the moderate edge:
+
+- **acutance gain** — perceived sharpness gained over the baseline: the
+  contrast-sensitivity-weighted area under the MTF curve, which follows the
+  mid/high-frequency band sharpening actually boosts (MTF50, often pinned by
+  the optics, barely moves and is reported for reference only);
+- **MTF peak** — the maximum of the frequency response (above 1.0 means
+  over-unity, i.e. visibly "crisped");
+- **overshoot / undershoot** — the edge halos as a fraction of the edge
+  step, measured as *growth over the baseline's own profile* (a printed edge
+  can carry static structure that reads as a constant halo; only what
+  sharpening adds counts). The hardware deliberately applies more negative
+  than positive gain, so undershoot usually leads.
+
+The recommended strength is the one with the **greatest acutance gain**
+whose worse halo stays within the halo cap (default 5% — a clean, subtle crispening; ~10% reads as punchy) *and* whose MTF
+peak stays under the peak cap (default 1.5 — default-strength sharpening
+measures ~1.4 and reads as crisp, not crunchy) — maximum perceived sharpness
+without visible halos. (The gain need not rise with strength: the threshold
+gates responses and the limit clips them, so the curve can flatten or fall;
+on a monotonic curve this degenerates to the largest acceptable strength.)
+At that strength the sweep then
+steps the limit, measuring halos on the high-contrast edge (the only place
+the delta cap engages), and recommends the largest limit within the halo cap.
+When the Macbeth chart shares the scene, grey-patch noise is also recorded
+per point, confirming the threshold choice still holds at the final strength.
+
+Processed output is tone-curve-encoded, so absolute MTF figures are biased —
+every number shown is a ratio against the identically-encoded baseline, which
+is why the scene must stay static and steadily lit for the whole run.
+
+<img src="images/sharpen-scene.png" alt="Sharpen tuning scene: resolution chart with slanted edges alongside a Macbeth chart" width="50%">
 
 ## HTTP API
 
@@ -343,6 +400,7 @@ tagging or sweeping against a bad reading. The web UI shows out-of-range values 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/projects/<name>/sharpen/data` | Stored sweep results plus context: `{results, target, base, can_apply, running}` |
+| GET | `/projects/<name>/sharpen/data` | Stored sweep results (`{threshold, strength}` sections) plus context: `{results, target, base, can_apply, running}` |
 | GET | `/projects/<name>/sharpen/sweep/stream` | Run a threshold sweep, streaming progress as Server-Sent Events. Query: `gain` (default 8), `frames` (1-8), `thresholds` (comma list), `tolerance`. Events: `start`, `log`, `chart`, `baseline`, `point`, then `done` (or `error`) |
-| POST | `/projects/<name>/sharpen/apply` | Write `{"threshold": t}` into the project's generated tuning's `rpi.sharpen` block (400 before a CTT run exists) |
+| GET | `/projects/<name>/sharpen/strength/stream` | Run a strength + limit sweep. Query: `gain`, `frames`, `strengths` (comma list), `limits` (comma list), `overshoot_cap` (fraction), `peak_cap`. Events: `start`, `log`, `edges`, `baseline`, `point` (with `phase`: `strength`/`limit`), then `done` (or `error`) |
+| POST | `/projects/<name>/sharpen/apply` | Write any of `{"threshold": t, "strength": s, "limit": l}` (at least one) into the project's generated tuning's `rpi.sharpen` block (400 before a CTT run exists) |

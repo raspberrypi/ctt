@@ -1017,10 +1017,11 @@ def create_app(workspace_root: str | None = None) -> Flask:
             return jsonify({'error': 'MTF measurement failed (is the capture a valid DNG?)'}), 500
         return jsonify({'rois': results_list})
 
-    # --- sharpen threshold tuning ---------------------------------------------
-    # Sweeps rpi.sharpen.threshold over temp tunings and measures grey-patch
-    # noise in the processed output. Results live in <project>/sharpen/, which
-    # calibration runs never scan — the same isolation as <project>/mtf/.
+    # --- sharpen tuning (threshold, strength, limit) ---------------------------
+    # Sweeps rpi.sharpen values over temp tunings and measures the processed
+    # output: grey-patch noise for the threshold, slanted-edge MTF/halos for
+    # strength and limit. Results live in <project>/sharpen/, which calibration
+    # runs never scan — the same isolation as <project>/mtf/.
 
     @app.route('/projects/<name>/sharpen')
     def sharpen_page(name: str):
@@ -1079,22 +1080,73 @@ def create_app(workspace_root: str | None = None) -> Flask:
             sharpen.sweep_stream(proj, camera, gain=gain, frames=frames, thresholds=thresholds, tolerance=tolerance)
         )
 
+    @app.route('/projects/<name>/sharpen/strength/stream')
+    def sharpen_strength_stream(name: str):
+        """Run a sharpen strength (+ limit) sweep, streaming progress as SSE.
+
+        Validation and camera failures are streamed as an error event rather
+        than returned as a 4xx (EventSource cannot read error bodies).
+        """
+        proj = get_project_or_404(name)
+
+        def error_events(message: str):
+            return iter([{'event': 'error', 'error': message}])
+
+        try:
+            gain = float(request.args.get('gain', sharpen.DEFAULT_GAIN))
+            frames = int(request.args.get('frames', sharpen.DEFAULT_FRAMES))
+            overshoot_cap = float(request.args.get('overshoot_cap', sharpen.DEFAULT_OVERSHOOT_CAP))
+            peak_cap = float(request.args.get('peak_cap', sharpen.DEFAULT_PEAK_CAP))
+            raw = request.args.get('strengths', '').strip()
+            strengths = [float(s) for s in raw.split(',') if s.strip()] if raw else None
+            raw = request.args.get('limits', '').strip()
+            limits = [float(v) for v in raw.split(',') if v.strip()] if raw else None
+        except ValueError:
+            return sse_response(error_events('invalid sweep settings'))
+        try:
+            camera = get_shared_camera()
+        except CameraError as err:
+            return sse_response(error_events(str(err)))
+        return sse_response(
+            sharpen.strength_sweep_stream(
+                proj,
+                camera,
+                gain=gain,
+                frames=frames,
+                strengths=strengths,
+                limits=limits,
+                overshoot_cap=overshoot_cap,
+                peak_cap=peak_cap,
+            )
+        )
+
+    # Apply value ranges: generous sanity bounds, not aesthetic judgements.
+    _SHARPEN_APPLY_RANGES = {'threshold': 16.0, 'strength': 8.0, 'limit': 8.0}
+
     @app.route('/projects/<name>/sharpen/apply', methods=['POST'])
     def sharpen_apply(name: str):
-        """Write a sweep-derived threshold into the project's generated tuning.
+        """Write sweep-derived rpi.sharpen values into the generated tuning.
 
-        The threshold is a calibration result, so it lands in the generated
-        file (like an import) rather than forking a custom variant — variants
-        based on the file correctly show as stale afterwards.
+        Accepts any of {threshold, strength, limit} (at least one). They are
+        calibration results, so they land in the generated file (like an
+        import) rather than forking a custom variant — variants based on the
+        file correctly show as stale afterwards.
         """
         proj = get_project_or_404(name)
         body = request.get_json(force=True) or {}
-        try:
-            threshold = float(body['threshold'])
-        except (KeyError, TypeError, ValueError):
-            return jsonify({'error': 'threshold must be a number'}), 400
-        if not 0 < threshold <= 16:
-            return jsonify({'error': 'threshold out of range (0, 16]'}), 400
+        values = {}
+        for key, upper in _SHARPEN_APPLY_RANGES.items():
+            if body.get(key) is None:
+                continue
+            try:
+                value = float(body[key])
+            except (TypeError, ValueError):
+                return jsonify({'error': f'{key} must be a number'}), 400
+            if not 0 < value <= upper:
+                return jsonify({'error': f'{key} out of range (0, {upper:g}]'}), 400
+            values[key] = value
+        if not values:
+            return jsonify({'error': 'supply at least one of threshold, strength or limit'}), 400
         target = platform_target()
         if target is None:
             return jsonify({'error': 'could not determine the ISP platform'}), 503
@@ -1105,14 +1157,18 @@ def create_app(workspace_root: str | None = None) -> Flask:
             tuning = json.loads(tuning_path.read_text())
         except (OSError, json.JSONDecodeError) as err:
             return jsonify({'error': f'could not read {tuning_path.name}: {err}'}), 500
-        sharpen.set_sharpen(tuning, threshold=threshold)
+        sharpen.set_sharpen(tuning, **values)
         tuning_path.write_text(json.dumps(tuning, indent=4))
         stored = sharpen.read_results(proj)
         if stored is not None:
             applied_at = datetime.now().astimezone().isoformat(timespec='seconds')
-            stored['applied'] = {'threshold': threshold, 'at': applied_at}
+            if 'threshold' in values and stored.get('threshold'):
+                stored['threshold']['applied'] = {'threshold': values['threshold'], 'at': applied_at}
+            if ('strength' in values or 'limit' in values) and stored.get('strength'):
+                applied = {k: values[k] for k in ('strength', 'limit') if k in values}
+                stored['strength']['applied'] = {**applied, 'at': applied_at}
             sharpen.results_path(proj).write_text(json.dumps(stored, indent=2))
-        return jsonify({'ok': True, 'file': tuning_path.name, 'threshold': threshold})
+        return jsonify({'ok': True, 'file': tuning_path.name, **values})
 
     # --- sensor characterisation --------------------------------------------
     # Offline analysis of the project's existing captures (dark bursts, ALSC
