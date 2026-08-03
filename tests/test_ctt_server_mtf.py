@@ -248,6 +248,100 @@ def test_auto_detect_flat_plane_empty(monkeypatch):
     assert mtf_mod.auto_detect('fake.dng') == []
 
 
+def ringing_edge(h=120, w=120, angle_deg=5.0, sigma=1.0, lo=0.1, hi=0.9, amplitude=0.1, lobe_w=2.0):
+    """A blurred step edge plus an antisymmetric halo lobe pair (a 'sharpened' edge).
+
+    The lobe profile a*(d/w)*exp(-d^2/2w^2) peaks at |d| = w with value
+    a*exp(-0.5), so the expected overshoot fraction is a*exp(-0.5)/(hi-lo).
+    """
+    slope = np.tan(np.radians(angle_deg))
+    cc, rr = np.meshgrid(np.arange(w, dtype=float), np.arange(h, dtype=float))
+    dist = cc - (w / 2 + slope * (rr - h / 2))
+    img = synthetic_edge(h, w, angle_deg, sigma, lo, hi)
+    return img + amplitude * (dist / lobe_w) * np.exp(-(dist**2) / (2 * lobe_w**2))
+
+
+# --- processed-plane generalisation (plane_step, halo metrics) ---
+
+
+def test_plane_step_scales_frequencies():
+    # The same plane analysed as full-resolution samples reports twice the
+    # cycles-per-sensor-pixel of the default half-resolution green plane.
+    edge = synthetic_edge(sigma=1.0)
+    full = analyse_edge(edge, plane_step=1)
+    half = analyse_edge(edge)
+    assert full['ok'] and half['ok']
+    np.testing.assert_allclose(full['mtf50'], 2 * half['mtf50'], rtol=1e-6)
+
+
+def test_gaussian_edge_no_halo_unity_peak():
+    out = analyse_edge(synthetic_edge(sigma=1.0))
+    assert out['ok']
+    assert out['mtf_peak'] <= 1.01  # blur only: monotonic MTF, peak at DC
+    assert out['overshoot'] < 0.01 and out['undershoot'] < 0.01
+    assert out['edge_low'] < 0.2 and out['edge_high'] > 0.8  # plateaus found
+
+
+def test_acutance_rises_with_sharpening():
+    # Acutance (CSF-weighted MTF area) must follow the mid/high-band lift a
+    # sharpened (ringing) edge produces, even where MTF50 barely moves.
+    plain = analyse_edge(synthetic_edge(sigma=1.0))
+    sharpened = analyse_edge(ringing_edge(sigma=1.0))
+    assert plain['ok'] and sharpened['ok']
+    assert 0 < plain['acutance'] <= 1.01
+    assert sharpened['acutance'] > plain['acutance']
+
+
+def test_ringing_edge_overshoot_measured():
+    amplitude, lo, hi = 0.1, 0.1, 0.9
+    expected = amplitude * np.exp(-0.5) / (hi - lo)
+    out = analyse_edge(ringing_edge(amplitude=amplitude, lo=lo, hi=hi))
+    assert out['ok'], out
+    np.testing.assert_allclose(out['overshoot'], expected, rtol=0.2)
+    np.testing.assert_allclose(out['undershoot'], expected, rtol=0.2)
+    assert out['mtf_peak'] > 1.0  # over-unity response from the halo
+
+
+def test_halo_metrics_orientation_invariant():
+    img = ringing_edge()
+    a = analyse_edge(img)
+    b = analyse_edge(np.fliplr(img))  # bright side on the other side
+    assert a['ok'] and b['ok']
+    np.testing.assert_allclose(a['overshoot'], b['overshoot'], rtol=0.15)
+    np.testing.assert_allclose(a['undershoot'], b['undershoot'], rtol=0.15)
+
+
+def test_fixed_edge_line_reused():
+    # A repeated measurement of a static edge must be able to reuse the
+    # baseline's fitted line instead of re-estimating it from noisy data.
+    rng = np.random.default_rng(5)
+    clean = synthetic_edge(sigma=1.0)
+    baseline = analyse_edge(clean)
+    assert baseline['ok'] and baseline['edge_line']
+    noisy = clean + rng.normal(0.0, 0.05, clean.shape)
+    out = analyse_edge(noisy, edge_line=baseline['edge_line'], min_monotonicity=0.15)
+    assert out['ok'], out
+    np.testing.assert_allclose(out['mtf50'], baseline['mtf50'], rtol=0.15)
+    assert out['angle_deg'] == baseline['angle_deg']  # geometry taken as given
+
+
+def test_detect_edges_plane_coords_and_contrast(monkeypatch):
+    import ctt_server.mtf as mtf_mod
+
+    plane = np.full((400, 600), 0.5)
+    plane[20:140, 30:150] = synthetic_edge(120, 120, sigma=1.0)
+    monkeypatch.setattr(mtf_mod, 'green_plane', lambda path: plane)
+
+    direct = mtf_mod.detect_edges(plane, plane_step=1)
+    via_dng = mtf_mod.auto_detect('fake.dng')
+    assert direct and via_dng
+    assert 'contrast' in direct[0] and direct[0]['contrast'] > 0
+    # plane_step=1 keeps plane coordinates; the DNG path doubles to sensor px.
+    assert via_dng[0]['x'] == 2 * direct[0]['x'] and via_dng[0]['w'] == 2 * direct[0]['w']
+    # Full-res analysis reports doubled frequencies too (4 dp rounding).
+    np.testing.assert_allclose(direct[0]['mtf50'], 2 * via_dng[0]['mtf50'], rtol=1e-2)
+
+
 def test_auto_detect_respects_max_regions(monkeypatch):
     import ctt_server.mtf as mtf_mod
 

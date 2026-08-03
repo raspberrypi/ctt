@@ -26,17 +26,47 @@ _OVERSAMPLE = 4
 _MIN_ANGLE_DEG, _MAX_ANGLE_DEG = 0.5, 10.0
 # A green-plane sample sits every 2 sensor pixels on each axis.
 _PLANE_STEP = 2
+# Sensor pixels per degree of view for the acutance weighting: roughly a
+# full-screen viewing distance. It places the CSF peak (~8 cy/deg) in the
+# mid-frequency band sharpening boosts; only ratios of acutance are compared,
+# so the exact viewing assumption is not critical.
+_CSF_PX_PER_DEG = 40.0
 
 
 def _fail(reason: str) -> dict:
     return {'ok': False, 'reason': reason}
 
 
-def analyse_edge(roi: np.ndarray) -> dict:
-    """Measure the MTF of a single slanted edge in a linear 2D (green-plane) ROI.
+def analyse_edge(
+    roi: np.ndarray,
+    *,
+    plane_step: int = _PLANE_STEP,
+    min_monotonicity: float = 0.4,
+    edge_line: tuple[float, float] | None = None,
+) -> dict:
+    """Measure the MTF of a single slanted edge in a 2D plane ROI.
 
-    Returns {'ok': True, 'angle_deg', 'mtf50', 'curve': [{'f', 'mtf'}, ...]}
-    with frequencies in cycles per sensor pixel, or {'ok': False, 'reason'}.
+    plane_step is how many sensor pixels one plane sample spans: 2 for the raw
+    green plane (the default), 1 for a full-resolution processed luma plane.
+    min_monotonicity is the single-clean-edge acceptance bar: the fraction of
+    the (smoothed) ESF's total variation the net level change must account
+    for. The default rejects bars/wedges/zone plates in unvalidated ROIs;
+    callers measuring a pre-validated edge that may carry heavy sharpening
+    halos and high-gain noise should relax it (halos legitimately add
+    variation on top of the step). edge_line optionally fixes the edge
+    geometry to a previously fitted (slope, x0) — repeated measurements of a
+    static scene should not re-estimate the line from each noisy capture,
+    where a marginal fit can flap across the angle/border guards; the fitted
+    line is returned as 'edge_line' for exactly this reuse.
+
+    Returns {'ok': True, 'angle_deg', 'mtf50', 'mtf_peak', 'overshoot',
+    'undershoot', 'edge_low', 'edge_high', 'curve': [{'f', 'mtf'}, ...]} with
+    frequencies in cycles per sensor pixel, or {'ok': False, 'reason'}.
+    mtf_peak is the maximum of the DC-normalised curve (> 1 means over-unity,
+    i.e. sharpened, response); overshoot/undershoot are the ESF halo excursions
+    beyond the bright/dark plateaus as a fraction of the edge step — ~0 on an
+    unsharpened edge. Both halo directions are reported because the sharpening
+    hardware deliberately applies more negative than positive gain.
     """
     roi = np.asarray(roi, dtype=np.float64)
     if roi.ndim != 2 or min(roi.shape) < 16:
@@ -55,22 +85,32 @@ def analyse_edge(roi: np.ndarray) -> dict:
     if hi - lo <= 1e-9 or (hi - lo) / max(hi, 1e-9) < 0.2:
         return _fail('No edge found (ROI contrast too low)')
 
-    # Per-row edge position: centroid of the squared row derivative.
+    # Per-row edge position: centroid of the squared row derivative. The
+    # good-row mask applies in both modes — rows whose gradient energy lies
+    # on other content (a neighbouring feature in the box) would smear the
+    # ESF projection.
     deriv = np.diff(roi, axis=1)
     weights = deriv**2
     row_strength = weights.sum(axis=1)
     good = row_strength > 0.1 * row_strength.max()
     if good.sum() < 8:
         return _fail('No edge found (too few usable rows)')
-    xs = np.arange(w - 1) + 0.5
-    centroids = (weights[good] * xs).sum(axis=1) / row_strength[good]
     rows = np.arange(h)[good]
 
-    # Fit the edge line x = slope*y + x0 and check the slant angle.
-    slope, x0 = np.polyfit(rows, centroids, 1)
-    angle = float(np.degrees(np.arctan(slope)))
-    if not (_MIN_ANGLE_DEG <= abs(angle) <= _MAX_ANGLE_DEG):
-        return _fail(f'Edge angle {angle:.1f}° outside {_MIN_ANGLE_DEG}–{_MAX_ANGLE_DEG}° (slant the chart)')
+    if edge_line is not None:
+        # Fixed geometry from a previous fit of the same (static) edge; the
+        # angle was validated back then.
+        slope, x0 = float(edge_line[0]), float(edge_line[1])
+        angle = float(np.degrees(np.arctan(slope)))
+    else:
+        xs = np.arange(w - 1) + 0.5
+        centroids = (weights[good] * xs).sum(axis=1) / row_strength[good]
+
+        # Fit the edge line x = slope*y + x0 and check the slant angle.
+        slope, x0 = np.polyfit(rows, centroids, 1)
+        angle = float(np.degrees(np.arctan(slope)))
+        if not (_MIN_ANGLE_DEG <= abs(angle) <= _MAX_ANGLE_DEG):
+            return _fail(f'Edge angle {angle:.1f}° outside {_MIN_ANGLE_DEG}–{_MAX_ANGLE_DEG}° (slant the chart)')
 
     # Project pixels onto the edge normal and bin into the oversampled ESF.
     # Only rows where the edge was actually detected take part: rows beyond the
@@ -98,13 +138,45 @@ def analyse_edge(roi: np.ndarray) -> dict:
     # A real edge has an essentially monotonic ESF: the net level change should
     # dominate the total variation. Oscillating content (zone plates, wedges, a
     # whole square inside the ROI) fails this even when it has strong gradients.
-    total_variation = np.abs(np.diff(esf)).sum()
-    if total_variation <= 0 or abs(esf[-1] - esf[0]) / total_variation < 0.4:
+    # Validity and halo statistics use a lightly smoothed copy (one plane px)
+    # so per-bin noise doesn't masquerade as structure; the MTF path below
+    # keeps the raw ESF.
+    kernel = np.ones(_OVERSAMPLE + 1) / (_OVERSAMPLE + 1)
+    # Edge-pad before convolving: zero padding would drag both ends of the
+    # smoothed ESF towards zero and corrupt the net-change measurement.
+    pad = len(kernel) // 2
+    esf_smooth = np.convolve(np.pad(esf, pad, mode='edge'), kernel, mode='valid')
+    total_variation = np.abs(np.diff(esf_smooth)).sum()
+    if total_variation <= 0 or abs(esf_smooth[-1] - esf_smooth[0]) / total_variation < min_monotonicity:
         return _fail('ROI is not a single clean edge')
 
-    # LSF, windowed around its peak to suppress noise far from the edge.
+    # Halo metrics from the ESF. Plateau levels come from the outer quarters
+    # (well clear of any few-pixel sharpening halo around the edge) via
+    # medians; the halo extrema are searched only in the central half so
+    # plateau noise can never register as a halo.
+    oriented = esf_smooth if esf_smooth[-1] >= esf_smooth[0] else esf_smooth[::-1]
+    quarter = nbins // 4
+    edge_low = float(np.median(oriented[:quarter]))
+    edge_high = float(np.median(oriented[-quarter:]))
+    step = edge_high - edge_low
+    core_esf = oriented[quarter : nbins - quarter]
+    overshoot = undershoot = None
+    if step > 1e-9 and core_esf.size:
+        overshoot = max(0.0, (float(core_esf.max()) - edge_high) / step)
+        undershoot = max(0.0, (edge_low - float(core_esf.min())) / step)
+
+    # LSF, windowed around its peak to suppress noise far from the edge. The
+    # peak is located on the smoothed profile so a single noisy bin cannot
+    # drag the window to the ROI border; with fixed geometry the edge is at
+    # the projection centre by construction, so the search stays in the
+    # central half (residual off-line content must not steal the window).
     lsf = np.gradient(esf)
-    peak = int(np.argmax(np.abs(lsf)))
+    search = np.abs(np.gradient(esf_smooth))
+    if edge_line is not None:
+        q = nbins // 4
+        peak = q + int(np.argmax(search[q : nbins - q]))
+    else:
+        peak = int(np.argmax(search))
     half = min(peak, nbins - 1 - peak)
     if half < 4 * _OVERSAMPLE:
         return _fail('Edge too close to the ROI border')
@@ -112,16 +184,24 @@ def analyse_edge(roi: np.ndarray) -> dict:
     window[peak - half : peak + half + 1] = np.hamming(2 * half + 1)
     lsf = lsf * window
 
-    # MTF: FFT magnitude, DC-normalised. Plane freq -> sensor freq (/2).
+    # MTF: FFT magnitude, DC-normalised. Plane freq -> sensor freq (/plane_step).
     mtf = np.abs(np.fft.rfft(lsf))
     if mtf[0] <= 0:
         return _fail('Degenerate edge response')
     mtf = mtf / mtf[0]
-    freqs = np.fft.rfftfreq(nbins, d=1.0 / _OVERSAMPLE) / _PLANE_STEP
+    freqs = np.fft.rfftfreq(nbins, d=1.0 / _OVERSAMPLE) / plane_step
 
     # Keep the curve up to sensor Nyquist (0.5 cycles/pixel).
     upto = freqs <= 0.5
     freqs, mtf = freqs[upto], mtf[upto]
+
+    # Perceptual sharpness: the CSF-weighted mean of the MTF (a simplified
+    # CPIQ acutance, Mannos-Sakrison CSF). Sharpening lifts the mid/high
+    # band and this integral follows it, where MTF50 — the 50% crossing,
+    # often pinned by the optics — barely moves.
+    f_deg = freqs * _CSF_PX_PER_DEG
+    csf = 2.6 * (0.0192 + 0.114 * f_deg) * np.exp(-((0.114 * f_deg) ** 1.1))
+    acutance = float((mtf * csf).sum() / max(csf.sum(), 1e-9))
 
     # MTF50: first 0.5 crossing, linearly interpolated.
     mtf50 = None
@@ -134,7 +214,14 @@ def analyse_edge(roi: np.ndarray) -> dict:
     return {
         'ok': True,
         'angle_deg': round(angle, 2),
+        'edge_line': [round(float(slope), 6), round(float(x0), 3)],
         'mtf50': round(mtf50, 4) if mtf50 is not None else None,
+        'mtf_peak': round(float(mtf.max()), 4),
+        'acutance': round(acutance, 4),
+        'overshoot': round(overshoot, 4) if overshoot is not None else None,
+        'undershoot': round(undershoot, 4) if undershoot is not None else None,
+        'edge_low': round(edge_low, 2),
+        'edge_high': round(edge_high, 2),
         'curve': [{'f': round(float(f), 4), 'mtf': round(float(m), 4)} for f, m in zip(freqs, mtf, strict=True)],
     }
 
@@ -189,15 +276,21 @@ def _zone(x: int, y: int, w: int, h: int, pw: int, ph: int) -> str:
 
 
 def auto_detect(dng_path: str, max_regions: int = 9) -> list[dict]:
-    """Find measurable slanted edges automatically.
+    """Find measurable slanted edges on a DNG's green plane (sensor px)."""
+    return detect_edges(green_plane(dng_path), plane_step=_PLANE_STEP, max_regions=max_regions)
 
-    Tiles the green plane with edge-shaped candidate boxes (tall for vertical
+
+def detect_edges(plane: np.ndarray, *, plane_step: int = _PLANE_STEP, max_regions: int = 9) -> list[dict]:
+    """Find measurable slanted edges automatically in any 2D plane.
+
+    Tiles the plane with edge-shaped candidate boxes (tall for vertical
     edges, wide for horizontal), keeps the ones that pass the full analysis,
     removes overlapping duplicates preferring higher-contrast edges, and
     spreads the survivors across frame zones so corners are represented, not
-    just the strongest cluster. Returns measure_rois-shaped dicts (sensor px).
+    just the strongest cluster. Returns measure_rois-shaped dicts with
+    coordinates in sensor pixels (plane px x plane_step) and each candidate's
+    plane-level contrast, so callers can classify edges by step height.
     """
-    plane = green_plane(dng_path)
     ph, pw = plane.shape
     white = np.percentile(plane, 99)
     candidates = []
@@ -209,7 +302,7 @@ def auto_detect(dng_path: str, max_regions: int = 9) -> list[dict]:
                 if hi - lo < 0.25 * white:  # cheap pre-filter: needs real contrast
                     continue
                 sx, sy = _snap_roi(plane, x, y, bw, bh)
-                result = analyse_edge(plane[sy : sy + bh, sx : sx + bw])
+                result = analyse_edge(plane[sy : sy + bh, sx : sx + bw], plane_step=plane_step)
                 if result['ok'] and result['mtf50'] is not None:
                     candidates.append({'x': sx, 'y': sy, 'w': bw, 'h': bh, 'contrast': hi - lo, **result})
 
@@ -233,14 +326,14 @@ def auto_detect(dng_path: str, max_regions: int = 9) -> list[dict]:
 
     out = []
     for c in picked:
-        c.pop('contrast', None)
         out.append(
             {
                 **c,
-                'x': c['x'] * _PLANE_STEP,
-                'y': c['y'] * _PLANE_STEP,
-                'w': c['w'] * _PLANE_STEP,
-                'h': c['h'] * _PLANE_STEP,
+                'contrast': round(float(c['contrast']), 2),
+                'x': c['x'] * plane_step,
+                'y': c['y'] * plane_step,
+                'w': c['w'] * plane_step,
+                'h': c['h'] * plane_step,
             }
         )
     out.sort(key=lambda c: (c['y'], c['x']))
