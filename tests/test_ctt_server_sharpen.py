@@ -18,6 +18,7 @@ from ctt_server.sharpen import (
     DEFAULT_PEAK_CAP,
     DEFAULT_TOLERANCE,
     GREY_SLICE,
+    REFERENCE_LIMIT,
     classify_edges,
     grey_patch_noise,
     patch_luma,
@@ -26,7 +27,10 @@ from ctt_server.sharpen import (
     recommend_limit,
     recommend_strength,
     recommend_threshold,
+    select_texture_tiles,
     set_sharpen,
+    strength_point_tunings,
+    texture_gain,
 )
 
 
@@ -102,6 +106,69 @@ class TestGreyPatchNoise:
         np.testing.assert_allclose(noise_multi, noise_single, rtol=0.25)
 
 
+class TestSelectTextureTiles:
+    def scene(self):
+        """Flat noise (1 LSB) with one faint-texture tile, one strong-texture
+        tile and one high-contrast edge tile, all grid-aligned."""
+        rng = np.random.default_rng(9)
+        luma = 128.0 + rng.normal(0.0, 1.0, (256, 320))
+        luma[64:128, 64:128] += rng.normal(0.0, 4.0, (64, 64))  # faint texture: in band
+        luma[192:256, 0:64] += rng.normal(0.0, 25.0, (64, 64))  # strong texture: above band
+        luma[0:64, 128:160] = 60.0  # edge tile: a hard step...
+        luma[0:64, 160:192] = 190.0  # ...excluded by its low-frequency swing
+        return luma
+
+    def test_selects_faint_texture_only(self):
+        tiles = select_texture_tiles(self.scene(), noise_floor=1.0)
+        assert [(t['x'], t['y']) for t in tiles] == [(64, 64)]
+        assert 2.0 <= tiles[0]['energy'] <= 10.0
+
+    def test_noise_floor_fallback_from_flat_tiles(self):
+        # Without a grey-patch noise floor the flattest tiles stand in for it.
+        tiles = select_texture_tiles(self.scene())
+        assert [(t['x'], t['y']) for t in tiles] == [(64, 64)]
+
+    def test_max_tiles_prefers_strongest(self):
+        rng = np.random.default_rng(3)
+        luma = 128.0 + rng.normal(0.0, 0.5, (128, 320))
+        for i, sigma in enumerate((3.0, 5.0, 4.0)):
+            luma[:64, i * 64 : (i + 1) * 64] += rng.normal(0.0, sigma, (64, 64))
+        tiles = select_texture_tiles(luma, noise_floor=0.5, max_tiles=2)
+        # The two strongest in-band tiles win: best signal-to-noise ratios.
+        assert [(t['x'], t['y']) for t in tiles] == [(64, 0), (128, 0)]
+
+    def test_flat_frame_returns_empty(self):
+        assert select_texture_tiles(np.full((256, 256), 128.0), noise_floor=1.0) == []
+
+    def test_frame_smaller_than_a_tile_returns_empty(self):
+        assert select_texture_tiles(np.full((32, 32), 128.0), noise_floor=1.0) == []
+
+
+class TestTextureGain:
+    def frames(self):
+        """A baseline with one texture tile, and the same scene with the
+        texture amplified 1.5x (what stronger sharpening does to it)."""
+        rng = np.random.default_rng(4)
+        base = 128.0 + rng.normal(0.0, 0.2, (128, 128))
+        tex = rng.normal(0.0, 4.0, (64, 64))
+        baseline = base.copy()
+        baseline[:64, :64] += tex
+        sharpened = base.copy()
+        sharpened[:64, :64] += 1.5 * tex
+        return baseline, sharpened
+
+    def test_gain_tracks_texture_amplification(self):
+        baseline, sharpened = self.frames()
+        tiles = select_texture_tiles(baseline, noise_floor=0.2)
+        assert [(t['x'], t['y']) for t in tiles] == [(0, 0)]
+        assert abs(texture_gain(baseline, tiles) - 1.0) < 0.05
+        gain = texture_gain(sharpened, tiles)
+        assert 1.4 < gain < 1.6
+
+    def test_no_tiles_gives_none(self):
+        assert texture_gain(np.full((128, 128), 128.0), []) is None
+
+
 class TestRecommendThreshold:
     def points(self, aggregates):
         return [{'threshold': t, 'aggregate': a} for t, a in aggregates]
@@ -161,6 +228,55 @@ class TestRecommendStrength:
         out = recommend_strength(self.points([(0.5, 0.2, 0.2, 1.5)]), 0.10, 1.25)
         assert out['strength'] is None
         assert 'cap' in out['reason']
+
+    def tex_points(self, rows):
+        return [
+            {
+                'strength': s,
+                'overshoot': 0.02,
+                'undershoot': 0.02,
+                'mtf_peak': 1.1,
+                'acutance_gain': a,
+                'texture_gain': t,
+                'mtf50_boost': 1.0,
+            }
+            for s, a, t in rows
+        ]
+
+    def test_texture_floor_prunes_soft_texture_pick(self):
+        # The observed failure mode: a weak strength wins on (edge) acutance
+        # but renders faint texture visibly softer than a stronger candidate.
+        points = self.tex_points([(0.25, 1.3, 1.05), (0.5, 1.2, 1.25), (1.0, 1.1, 1.3)])
+        out = recommend_strength(points, 0.10, 1.25)
+        assert out['strength'] == 0.5  # 0.25's texture is >5% below the best (1.3)
+        assert out['texture_gain'] == 1.25
+
+    def test_texture_within_slack_keeps_acutance_choice(self):
+        points = self.tex_points([(0.25, 1.3, 1.28), (0.5, 1.2, 1.29), (1.0, 1.1, 1.3)])
+        assert recommend_strength(points, 0.10, 1.25)['strength'] == 0.25
+
+    def test_capped_point_does_not_set_texture_floor(self):
+        # A point over the halo/peak caps must not raise the floor for the rest.
+        points = self.tex_points([(0.5, 1.2, 1.1), (1.0, 1.15, 1.12)])
+        points += [
+            {
+                'strength': 2.0,
+                'overshoot': 0.3,
+                'undershoot': 0.3,
+                'mtf_peak': 1.5,
+                'acutance_gain': 1.4,
+                'texture_gain': 2.0,
+                'mtf50_boost': 1.2,
+            }
+        ]
+        assert recommend_strength(points, 0.10, 1.25)['strength'] == 0.5
+
+    def test_without_texture_measurements_acutance_rules(self):
+        # No texture tiles in the scene: the floor disengages entirely.
+        points = self.points([(0.5, 0.02, 0.03, 1.05), (1.0, 0.05, 0.08, 1.15)])
+        out = recommend_strength(points, 0.10, 1.25)
+        assert out['strength'] == 1.0
+        assert out['texture_gain'] is None
 
     def test_non_monotonic_gain_picks_highest(self):
         # The threshold gate and limit clipping can make sharpness FALL with
@@ -450,6 +566,28 @@ def test_merge_results_preserves_other_section(tmp_path):
     sharpen_mod._merge_results(proj, 'threshold', {'recommended': {'threshold': 0.4}})
     stored = json.loads(sharpen_mod.results_path(proj).read_text())
     assert stored['strength']['recommended']['strength'] == 1.0
+
+
+def test_strength_point_tunings_pin_the_reference_limit():
+    points = strength_point_tunings([0.5, 1.0])
+    # Baseline first, then the candidates in order — and every point carries
+    # the explicit reference limit, so the base tuning's limit never leaks in.
+    assert points[0]['strength'] == 0.0
+    assert [p['strength'] for p in points[1:]] == [0.5, 1.0]
+    assert all(p['limit'] == REFERENCE_LIMIT for p in points)
+
+
+def test_strength_point_tunings_override_base_limit(tmp_path):
+    import ctt_server.sharpen as sharpen_mod
+
+    # A base tuning arriving with a tight limit must not steer the phase:
+    # the written point files carry the reference limit instead.
+    base = tmp_path / 'base.json'
+    base.write_text(json.dumps(v2_tuning({'threshold': 0.75, 'limit': 0.125, 'strength': 1.0})))
+    paths = sharpen_mod._write_point_tunings(base, tmp_path / 'tmp', strength_point_tunings([0.5]), prefix='s')
+    for path in paths:
+        block = json.loads(path.read_text())['algorithms'][1]['rpi.sharpen']
+        assert block['limit'] == REFERENCE_LIMIT
 
 
 def test_write_point_tunings_unique_files_and_kwargs(tmp_path):

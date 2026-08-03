@@ -17,11 +17,13 @@
 #     stays within tolerance (most real-detail sharpening, no noise crunch).
 #   - strength: sweep candidates and measure a moderate-contrast slanted edge
 #     in the processed output: MTF50 boost and ESF overshoot/undershoot
-#     (halos) versus the same baseline. Recommend the largest strength whose
-#     halos and MTF peak stay under their caps (most acuity, no visible
-#     halos). Processed output is tone-curve-encoded, so absolute MTF is
-#     biased — every figure here is a ratio against the identically-encoded
-#     baseline.
+#     (halos) versus the same baseline, plus the high-frequency energy gain
+#     on faint-texture tiles auto-selected from the baseline. Recommend the
+#     strength with the greatest acutance gain within the halo and MTF-peak
+#     caps whose texture gain stays near the best candidate's (most acuity,
+#     no visible halos, texture not traded away for edge crispness).
+#     Processed output is tone-curve-encoded, so absolute MTF is biased —
+#     every figure here is a ratio against the identically-encoded baseline.
 #   - limit: at the chosen strength, sweep candidates and measure halos on a
 #     high-contrast edge (the only place the delta cap engages). Recommend
 #     the largest limit that keeps them under the cap.
@@ -74,6 +76,14 @@ MIN_USEFUL_BOOST = 1.1
 # bracketing the template default 1.0. Limits: geometric around template 0.5.
 DEFAULT_STRENGTHS = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
 DEFAULT_LIMITS = (0.125, 0.25, 0.5, 1.0, 2.0)
+# The strength phase measures every point at this explicit limit rather than
+# inheriting the base tuning's: an inherited limit lets the file's starting
+# state steer the recommendation (a file arriving with a tight limit measures
+# different halos than one arriving loose, and each converges to its own
+# corner). The value must leave the candidates room to differ — a tight limit
+# clips moderate-edge deltas so hard that every strength renders alike — yet
+# not inflate halos to an unclipped worst case no final tuning would ship.
+REFERENCE_LIMIT = 1.0
 # Calibrated against perception: 5% halo growth reads as a clean, subtle
 # crispening on real charts; 10% is already punchy and anything near the
 # strength-2/limit-1 look (visible ringing) sits far above it.
@@ -83,6 +93,22 @@ DEFAULT_OVERSHOOT_CAP = 0.05
 # the cap only exists to reject genuinely crunchy response above that.
 DEFAULT_PEAK_CAP = 1.5
 MAX_EDGES = 5
+# Faint-texture floor for the strength pick. Acutance is measured on edges,
+# and faint texture — whose small deltas sit below any limit, so only the
+# strength renders it — does not enter it; without a texture term the
+# recommendation can collapse to a weak strength that draws crisp edges but
+# soft newsprint and fabric. A candidate must keep its texture gain within
+# this fraction of the best in-cap point's.
+DEFAULT_TEXTURE_SLACK = 0.05
+# Texture tiles are selected once from the baseline capture: high-frequency
+# energy comfortably above the sensor noise floor (real detail, not noise)
+# but faint in absolute 8-bit-luma terms (below the reach of any limit), and
+# no strong edge through the tile (its low-frequency swing stays small).
+_TEXTURE_TILE = 64
+_TEXTURE_NOISE_FACTOR = 2.0
+_TEXTURE_MAX_ENERGY = 10.0
+_TEXTURE_MAX_STRUCTURE = 25.0
+MAX_TEXTURE_TILES = 12
 
 # The grey (achromatic) patches are the chart's bottom row: every 4th patch
 # from index 3 in patch-detector order (see ctt.detection.patches).
@@ -225,6 +251,88 @@ def grey_patch_noise(frames: list[np.ndarray], centres: np.ndarray) -> tuple[lis
     return noise, means
 
 
+def strength_point_tunings(strengths: list[float]) -> list[dict]:
+    """set_sharpen kwargs for the strength phase: the sharpening-off baseline
+    plus each candidate, all pinned to the reference limit so the base
+    tuning's own limit cannot steer the phase."""
+    return [{'strength': 0.0, 'limit': REFERENCE_LIMIT}] + [
+        {'strength': s, 'limit': REFERENCE_LIMIT} for s in strengths
+    ]
+
+
+def select_texture_tiles(
+    mean_luma: np.ndarray, noise_floor: float | None = None, max_tiles: int = MAX_TEXTURE_TILES
+) -> list[dict]:
+    """Auto-select faint-texture tiles from a baseline mean-luma frame.
+
+    A texture tile carries high-frequency energy comfortably above the noise
+    floor (real detail, not just sensor noise) yet faint in absolute terms
+    (its sharpening deltas sit below any limit, so the strength alone renders
+    it), and no strong edge crosses it — an edge would dominate the tile's
+    energy, and edges are already the acutance metric's business. The edge
+    test is the tile's low-frequency swing: the 5-95 percentile range of its
+    Gaussian-smoothed copy, small for fine texture on a flat background and
+    of the order of the step height when an edge runs through.
+
+    noise_floor is sensor noise in the same high-pass metric (the grey-patch
+    median); when the chart is not in the scene it is estimated from the
+    flattest tiles, which carry noise and nothing else. The strongest in-band
+    tiles are preferred: their gain ratios have the best signal-to-noise.
+    """
+    from scipy.ndimage import gaussian_filter  # noqa: PLC0415 (heavy import)
+
+    luma = np.asarray(mean_luma, dtype=np.float64)
+    h, w = luma.shape
+    tile = _TEXTURE_TILE
+    inset = int(np.ceil(2 * _HP_SIGMA))
+    candidates = []
+    for y in range(0, h - tile + 1, tile):
+        for x in range(0, w - tile + 1, tile):
+            crop = luma[y : y + tile, x : x + tile]
+            low = gaussian_filter(crop, _HP_SIGMA)[inset : tile - inset, inset : tile - inset]
+            candidates.append(
+                {
+                    'x': x,
+                    'y': y,
+                    'w': tile,
+                    'h': tile,
+                    'energy': patch_spatial_noise(crop),
+                    'structure': float(np.percentile(low, 95) - np.percentile(low, 5)),
+                }
+            )
+    if not candidates:
+        return []
+    if noise_floor is None:
+        noise_floor = float(np.percentile([c['energy'] for c in candidates], 10))
+    in_band = [
+        c
+        for c in candidates
+        if _TEXTURE_NOISE_FACTOR * noise_floor <= c['energy'] <= _TEXTURE_MAX_ENERGY
+        and c['structure'] <= _TEXTURE_MAX_STRUCTURE
+    ]
+    in_band.sort(key=lambda c: -c['energy'])
+    return [
+        {'x': c['x'], 'y': c['y'], 'w': c['w'], 'h': c['h'], 'energy': round(c['energy'], 4)}
+        for c in in_band[:max_tiles]
+    ]
+
+
+def texture_gain(mean_luma: np.ndarray, tiles: list[dict]) -> float | None:
+    """Median high-frequency energy gain across the texture tiles.
+
+    Each tile's 'energy' is its baseline value; the same metric on the same
+    tile of a sweep-point frame, as a ratio, is how much sharpening lifted
+    the faint texture there (1.0 = untouched).
+    """
+    luma = np.asarray(mean_luma, dtype=np.float64)
+    ratios = [
+        patch_spatial_noise(luma[t['y'] : t['y'] + t['h'], t['x'] : t['x'] + t['w']]) / t['energy']
+        for t in tiles
+        if t['energy'] > 1e-6
+    ]
+    return round(float(np.median(ratios)), 4) if ratios else None
+
+
 def recommend_threshold(points: list[dict], tolerance: float = DEFAULT_TOLERANCE) -> dict:
     """Pick the smallest threshold whose aggregate noise ratio is in tolerance.
 
@@ -271,7 +379,10 @@ def _halo(point: dict) -> float | None:
 
 
 def recommend_strength(
-    points: list[dict], overshoot_cap: float = DEFAULT_OVERSHOOT_CAP, peak_cap: float = DEFAULT_PEAK_CAP
+    points: list[dict],
+    overshoot_cap: float = DEFAULT_OVERSHOOT_CAP,
+    peak_cap: float = DEFAULT_PEAK_CAP,
+    texture_slack: float = DEFAULT_TEXTURE_SLACK,
 ) -> dict:
     """Pick the strength with the greatest perceived sharpness within the caps.
 
@@ -281,14 +392,29 @@ def recommend_strength(
     guaranteed to rise with strength (the threshold gates responses and the
     limit clips them), so the highest gain inside the halo and MTF-peak caps
     is what "best" means; ties break towards the larger strength.
+
+    Acutance is an edge metric, and the faint texture only the strength
+    renders (its deltas sit below any limit) never enters it — scored on
+    acutance alone the pick can collapse to a weak strength with crisp edges
+    but soft newsprint and fabric. So where texture gain was measured, a
+    candidate must also hold its texture gain within texture_slack of the
+    best in-cap point's. The floor cannot empty the candidate set: the best
+    texture point always satisfies its own floor.
     """
-    best = None
-    for point in sorted(points, key=lambda p: p['strength'], reverse=True):
+    eligible = []
+    for point in points:
         halo = _halo(point)
         if halo is None or point.get('mtf_peak') is None or point.get('acutance_gain') is None:
             continue
         if halo > overshoot_cap or point['mtf_peak'] > peak_cap:
             continue
+        eligible.append(point)
+    textured = [p for p in eligible if p.get('texture_gain') is not None]
+    if textured:
+        floor = max(p['texture_gain'] for p in textured) * (1.0 - texture_slack)
+        eligible = [p for p in textured if p['texture_gain'] >= floor]
+    best = None
+    for point in sorted(eligible, key=lambda p: p['strength'], reverse=True):
         if best is None or point['acutance_gain'] > best['acutance_gain']:
             best = point
     if best is not None:
@@ -297,6 +423,7 @@ def recommend_strength(
             'overshoot': _halo(best),
             'mtf_peak': best['mtf_peak'],
             'acutance_gain': best['acutance_gain'],
+            'texture_gain': best.get('texture_gain'),
             'mtf50_boost': best.get('mtf50_boost'),
             'reason': None,
         }
@@ -305,6 +432,7 @@ def recommend_strength(
         'overshoot': None,
         'mtf_peak': None,
         'acutance_gain': None,
+        'texture_gain': None,
         'mtf50_boost': None,
         'reason': 'every strength exceeded the halo or MTF-peak cap — lower the candidates or raise the caps',
     }
@@ -746,10 +874,13 @@ def strength_sweep_stream(
     """Run a sharpen strength (+ limit) sweep, yielding structured progress events.
 
     Strength is measured on moderate-contrast slanted edges (MTF50 boost, MTF
-    peak, ESF halos vs the strength-0 baseline); at the recommended strength,
-    limit is then measured on high-contrast edges where the delta cap engages.
-    Grey-patch noise is recorded per point when the Macbeth chart is also in
-    the scene. Same camera-reload/restore behaviour as the threshold sweep.
+    peak, ESF halos vs the strength-0 baseline) and on faint-texture tiles
+    auto-selected from the baseline (texture gain, the strength floor), with
+    every strength point pinned to REFERENCE_LIMIT so the base tuning's own
+    limit cannot steer the phase; at the recommended strength, limit is then
+    measured on high-contrast edges where the delta cap engages. Grey-patch
+    noise is recorded per point when the Macbeth chart is also in the scene.
+    Same camera-reload/restore behaviour as the threshold sweep.
     """
     yield from _guarded(_strength_sweep(project, camera, gain, frames, strengths, limits, overshoot_cap, peak_cap))
 
@@ -802,9 +933,12 @@ def _strength_sweep(
             f'{locked["colour_gains"][0]:.2f}/{locked["colour_gains"][1]:.2f}',
         }
 
-        point_paths = _write_point_tunings(
-            base_path, tmp_dir, [{'strength': 0.0}] + [{'strength': s} for s in strengths], prefix='s'
-        )
+        point_paths = _write_point_tunings(base_path, tmp_dir, strength_point_tunings(strengths), prefix='s')
+        yield {
+            'event': 'log',
+            'line': f'strength points measured at reference limit {REFERENCE_LIMIT:g} '
+            '(the base tuning limit does not steer the phase)',
+        }
 
         # Baseline (strength 0): find and lock the edges, classify by contrast.
         yield {'event': 'log', 'line': 'capturing baseline (sharpening disabled)'}
@@ -851,11 +985,26 @@ def _strength_sweep(
         if centres is not None:
             baseline_noise, _ = grey_patch_noise(captured, centres)
             yield {'event': 'log', 'line': 'Macbeth chart co-visible: grey-patch noise recorded per point'}
+
+        # Faint-texture floor: tiles are picked once from the baseline, and
+        # every point reports its texture gain on exactly these tiles.
+        noise_floor = float(np.median(baseline_noise)) if baseline_noise else None
+        tex_tiles = select_texture_tiles(mean_luma, noise_floor)
+        if tex_tiles:
+            yield {'event': 'log', 'line': f'{len(tex_tiles)} faint-texture tile(s) selected for the texture floor'}
+        else:
+            warnings.append(
+                'no faint-texture region found — the strength pick cannot protect texture rendering; '
+                'add a finely textured object (newspaper, fabric) to the scene'
+            )
+            yield {'event': 'log', 'line': f'warning: {warnings[-1]}'}
+
         baseline_mtf50_median = round(float(np.median([edges[i]['mtf50'] for i in moderate])), 4)
         yield {
             'event': 'baseline',
             'mtf50': baseline_mtf50_median,
             'per_edge': baseline_edges,
+            'texture_tiles': len(tex_tiles),
             'index': 0,
             'total': total,
         }
@@ -881,17 +1030,19 @@ def _strength_sweep(
                 noise, _means = grey_patch_noise(captured_pt, centres)
                 ratios = [n / max(b, 1e-6) for n, b in zip(noise, baseline_noise, strict=True)]
                 noise_aggregate = round(float(np.median(ratios)), 4)
-            return per_edge, agg, point_warnings, noise_aggregate
+            texture = texture_gain(mean_luma_pt, tex_tiles) if tex_tiles else None
+            return per_edge, agg, point_warnings, noise_aggregate, texture
 
         # Strength phase: measure the moderate-contrast edges.
         points = []
         for i, strength in enumerate(strengths):
             camera, captured = _capture_point(point_paths[i + 1], locked, frames)
             mean_luma = np.mean([patch_luma(f) for f in captured], axis=0)
-            per_edge, agg, point_warnings, noise_aggregate = measure_point(mean_luma, captured, moderate)
+            per_edge, agg, point_warnings, noise_aggregate, texture = measure_point(mean_luma, captured, moderate)
             point = {
                 'strength': strength,
                 **agg,
+                'texture_gain': texture,
                 'noise_aggregate': noise_aggregate,
                 'per_edge': per_edge,
                 'warnings': point_warnings,
@@ -926,10 +1077,11 @@ def _strength_sweep(
             for i, limit in enumerate(limits):
                 camera, captured = _capture_point(limit_paths[i], locked, frames)
                 mean_luma = np.mean([patch_luma(f) for f in captured], axis=0)
-                per_edge, agg, point_warnings, noise_aggregate = measure_point(mean_luma, captured, high)
+                per_edge, agg, point_warnings, noise_aggregate, texture = measure_point(mean_luma, captured, high)
                 point = {
                     'limit': limit,
                     **agg,
+                    'texture_gain': texture,
                     'noise_aggregate': noise_aggregate,
                     'per_edge': per_edge,
                     'warnings': point_warnings,
@@ -953,6 +1105,7 @@ def _strength_sweep(
                     'limits': limits,
                     'overshoot_cap': overshoot_cap,
                     'peak_cap': peak_cap,
+                    'reference_limit': REFERENCE_LIMIT,
                 },
                 'edges': [
                     {**{k: e[k] for k in ('x', 'y', 'w', 'h', 'zone')}, 'contrast_class': c}
@@ -962,6 +1115,7 @@ def _strength_sweep(
                     'mtf50': baseline_mtf50_median,
                     'per_edge': baseline_edges,
                     'noise': [round(n, 4) for n in baseline_noise] if baseline_noise else None,
+                    'texture_tiles': tex_tiles,
                 },
                 'points': points,
                 'limit_points': limit_points,

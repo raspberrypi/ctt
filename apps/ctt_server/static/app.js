@@ -2862,7 +2862,8 @@ function sharpenApp(cfg) {
         }
         case 'baseline':
           this.progress.index = ev.index + 1;
-          this.pushLog(this.strengthLog, `baseline captured: MTF50 ${ev.mtf50}`);
+          this.pushLog(this.strengthLog, `baseline captured: MTF50 ${ev.mtf50}`
+            + (ev.texture_tiles ? `, ${ev.texture_tiles} texture tile(s)` : ''));
           break;
         case 'point':
           this.progress.index = ev.index + 1;
@@ -2874,6 +2875,7 @@ function sharpenApp(cfg) {
           } else {
             this.liveStrengthPoints.push(ev);
             this.pushLog(this.strengthLog, `strength ${ev.strength}: acutance x${ev.acutance_gain ?? '—'}, `
+              + `texture x${ev.texture_gain ?? '—'}, `
               + `MTF50 x${ev.mtf50_boost ?? '—'}, peak ${ev.mtf_peak ?? '—'}, overshoot ${this.fmtPct(ev.overshoot)}`
               + (ev.noise_aggregate != null ? `, noise ratio ${ev.noise_aggregate.toFixed(3)}` : ''));
             this.$nextTick(() => this.renderStrength(this.liveStrengthPoints));
@@ -2984,6 +2986,9 @@ function sharpenApp(cfg) {
         { label: 'acutance ÷ baseline', type: 'line', borderColor: '#f06595', backgroundColor: '#f06595',
           borderWidth: 3, pointRadius: 4, yAxisID: 'y',
           data: pts.map((p) => ({ x: p.strength, y: p.acutance_gain })) },
+        { label: 'texture ÷ baseline', type: 'line', borderColor: '#96f2d7', backgroundColor: '#96f2d7',
+          borderWidth: 2, pointRadius: 3, yAxisID: 'y',
+          data: pts.map((p) => ({ x: p.strength, y: p.texture_gain })) },
         { label: 'MTF50 ÷ baseline', type: 'line', borderColor: '#d0bfff', backgroundColor: '#d0bfff',
           borderWidth: 1, pointRadius: 2, yAxisID: 'y',
           data: pts.map((p) => ({ x: p.strength, y: p.mtf50_boost })) },

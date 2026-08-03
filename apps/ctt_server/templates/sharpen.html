@@ -130,8 +130,10 @@
       edge halos (over/undershoot) against a sharpening-off baseline. An ISO 12233 / eSFR chart (as used by the MTF
       tab) is the ideal target — its edges are moderate contrast (drives the strength choice) and its registration
       marks give the strong black/white edges the limit choice needs; keep the Macbeth chart in the scene too and
-      grey-patch noise is recorded per point. Tune and apply the threshold first; all figures are ratios against
-      the same scene, so keep it static and steadily lit.</p>
+      grey-patch noise is recorded per point. Include a finely textured object as well (newspaper, fabric, yarn):
+      faint texture is measured per point and stops the recommendation trading texture away for edge crispness.
+      Tune and apply the threshold first; all figures are ratios against the same scene, so keep it static and
+      steadily lit.</p>
 
     <div class="field-row" style="align-items:flex-start">
       <div class="field" style="margin-bottom:0">
@@ -189,7 +191,9 @@
 
     <div class="banner info" x-show="sRecommended && sRecommended.strength !== null" x-cloak>
       Recommended strength: <b x-text="sRecommended && sRecommended.strength"></b>
-      (acutance ×<span x-text="sRecommended && sRecommended.acutance_gain"></span>,
+      (acutance ×<span x-text="sRecommended && sRecommended.acutance_gain"></span><span
+        x-show="sRecommended && sRecommended.texture_gain != null">, texture
+      ×<span x-text="sRecommended && sRecommended.texture_gain"></span></span>,
       halo <span x-text="sRecommended && fmtPct(sRecommended.overshoot)"></span>)<span
         x-show="sRecommendedLimit && sRecommendedLimit.limit !== null"> ·
       limit: <b x-text="sRecommendedLimit && sRecommendedLimit.limit"></b>
@@ -218,22 +222,25 @@
     </div>
     <p class="hint">Left: sharpness gained against edge halo growth as the strength rises. Acutance (the
       contrast-sensitivity-weighted MTF area) is the headline: sharpening lifts the mid/high band it integrates,
-      where MTF50 — often pinned by the optics — barely moves. The recommendation is the strength with the greatest
-      acutance gain within the halo and MTF-peak caps. Right: halo growth on the high-contrast edge as the limit
-      rises, measured at the recommended strength.</p>
+      where MTF50 — often pinned by the optics — barely moves. Texture is the high-frequency energy gain on
+      faint-texture tiles picked from the baseline — the detail only the strength renders. The recommendation is
+      the strength with the greatest acutance gain within the halo and MTF-peak caps whose texture gain stays
+      within 5% of the best candidate's. Right: halo growth on the high-contrast edge as the limit rises,
+      measured at the recommended strength.</p>
     <div class="hint" x-show="sWarnings.length" x-cloak>
       <template x-for="w in sWarnings"><div x-text="'⚠ ' + w"></div></template>
     </div>
 
     <table x-show="showStrengthPoints" x-cloak style="margin-top:10px">
       <thead><tr>
-        <th>Strength</th><th>Acutance ×</th><th>MTF50 ×</th><th>MTF peak</th><th>Overshoot</th><th>Undershoot</th><th>Noise ratio</th>
+        <th>Strength</th><th>Acutance ×</th><th>Texture ×</th><th>MTF50 ×</th><th>MTF peak</th><th>Overshoot</th><th>Undershoot</th><th>Noise ratio</th>
       </tr></thead>
       <tbody>
         <template x-for="p in sPoints" :key="p.strength">
           <tr>
             <td class="mono" x-text="p.strength"></td>
             <td class="mono" x-text="p.acutance_gain != null ? p.acutance_gain.toFixed(3) : '—'"></td>
+            <td class="mono" x-text="p.texture_gain != null ? p.texture_gain.toFixed(3) : '—'"></td>
             <td class="mono" x-text="p.mtf50_boost != null ? p.mtf50_boost.toFixed(3) : '—'"></td>
             <td class="mono" x-text="p.mtf_peak != null ? p.mtf_peak.toFixed(3) : '—'"></td>
             <td class="mono" x-text="fmtPct(p.overshoot)"></td>
@@ -258,7 +265,9 @@
     </table>
     <div class="hint mt" x-show="sSettings" x-cloak>
       <span x-text="sSettings && ('Measured at gain ' + sSettings.gain + ' · ' + sSettings.exposure_us + ' µs · '
-                    + sSettings.frames + ' frame(s) per point · base ' + (strengthResults.base_tuning && strengthResults.base_tuning.name)
+                    + sSettings.frames + ' frame(s) per point'
+                    + (sSettings.reference_limit != null ? ' · reference limit ' + sSettings.reference_limit : '')
+                    + ' · base ' + (strengthResults.base_tuning && strengthResults.base_tuning.name)
                     + ' · ' + strengthResults.generated_at)"></span>
     </div>
   </div>
