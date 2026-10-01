@@ -88,7 +88,7 @@ class TestGroupAveraging:
         def fake_load(cam, im_str, demosaic=True):
             img = Image()
             value = next(calls)
-            img.channels = [np.full((64, 64), value, dtype=np.float64) for _ in range(4)]
+            img.channels = [np.full((64, 64), value, dtype=np.uint16) for _ in range(4)]
             img.sigbits = 12
             img.blacklevel_16 = 0
             img.name = im_str.split('/')[-1]
@@ -102,7 +102,7 @@ class TestGroupAveraging:
         return loader_mod
 
     def test_group_averages_channels_and_keeps_single_patches(self, tmp_path, monkeypatch):
-        loader_mod = self._stub_loader(monkeypatch, [1000.0, 3000.0])
+        loader_mod = self._stub_loader(monkeypatch, [1000, 3000])
         cam = Camera('out.json', json={})
         img = loader_mod.load_image_group(cam, ['/x/a_5000k_800l_0.dng', '/x/a_5000k_800l_1.dng'], (0, 0))
         assert img is not None
@@ -136,9 +136,12 @@ class TestGroupAveraging:
 
         cam = Camera('out.json', json={})
         img = loader_mod.load_image_group(cam, [f'/x/a_5000k_800l_{i}.dng' for i in range(8)], (0, 0))
+        # Only the exact sums are kept after detection; the average rebuilt from them
+        # is what later consumers (lux) see.
+        assert img.channels == []
         for i in range(4):
             expected = np.mean([f[i] for f in frames], axis=0)
-            np.testing.assert_array_equal(img.channels[i], expected)
+            np.testing.assert_array_equal(img.channel_values(i), expected)
 
     def test_single_member_group_is_plain_load(self, tmp_path, monkeypatch):
         loader_mod = self._stub_loader(monkeypatch, [3000.0])

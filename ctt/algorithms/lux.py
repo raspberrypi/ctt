@@ -51,7 +51,7 @@ class LuxCalibration(CalibrationAlgorithm):
         # in the metrics so the Results page can plot it.
         samples = []
         for img in cam.imgs:
-            y = lux_calc(cam, img, [img.patches[i] for i in img.order], [img.channels[i] for i in img.order])
+            y = lux_calc(cam, img, [img.patches[i] for i in img.order], [img.channel_values(i) for i in img.order])
             slope = y / (img.lux * img.exposure * img.againQ8_norm)
             samples.append({'name': img.name, 'ct': int(img.col), 'lux': int(img.lux), 'y': y, 'slope': slope})
 

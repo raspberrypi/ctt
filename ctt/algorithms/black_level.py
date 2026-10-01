@@ -35,6 +35,18 @@ _CHANNEL_SPREAD_LIMIT = 0.005 * (2**16)
 _METADATA_DELTA_LIMIT = 0.01 * (2**16)
 
 
+def reduce_dark_image(img: Image, drop_channels: bool = True) -> None:
+    """Keep the per-channel mean and std of a dark frame, all that is measured from it.
+
+    With drop_channels the full-resolution channels are then released, so a run can
+    hold its dark frames without holding their pixels.
+    """
+    img.channel_means = [float(np.mean(ch)) for ch in img.channels]
+    img.channel_stds = [float(np.std(ch)) for ch in img.channels]
+    if drop_channels:
+        img.channels = []
+
+
 def measure_dark_image(img: Image) -> dict:
     """Per-channel black level means of a loaded dark frame, 16-bit scaled.
 
@@ -42,8 +54,10 @@ def measure_dark_image(img: Image) -> dict:
     mapping established in image_loader.dng_load_image. Mono sensors (pattern
     128) report a single 'y' value instead of 'r'/'g'/'b'.
     """
-    means = [float(np.mean(img.channels[i])) for i in img.order]
-    stds = [float(np.std(img.channels[i])) for i in img.order]
+    if img.channel_means is None:
+        reduce_dark_image(img, drop_channels=False)
+    means = [img.channel_means[i] for i in img.order]
+    stds = [img.channel_stds[i] for i in img.order]
     out = {
         'name': img.name,
         'black_level': float(np.mean(means)),

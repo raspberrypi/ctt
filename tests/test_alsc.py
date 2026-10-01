@@ -2,11 +2,14 @@
 #
 # Copyright (C) 2026, Raspberry Pi
 #
-# Tests for ALSC post-correction residual prediction.
+# Tests for ALSC table calculation and post-correction residual prediction.
 
 import numpy as np
+import pytest
 
-from ctt.algorithms.alsc import alsc_residuals, get_grid
+from ctt.algorithms.alsc import alsc, alsc_cell_means, alsc_residuals, get_grid
+from ctt.core.camera import Camera
+from ctt.core.image import Image
 
 GRID = (16, 12)
 
@@ -21,6 +24,40 @@ def test_get_grid_uint16_matches_float_reference():
     out = get_grid(chan, dx, dy, GRID)
     ref = get_grid(chan.astype(np.float64), dx, dy, GRID)
     np.testing.assert_allclose(out, ref)
+
+
+def _alsc_image(reduced: bool) -> Image:
+    """A synthetic uint16 flat-field, optionally reduced to its cell means as at load."""
+    rng = np.random.default_rng(3)
+    img = Image()
+    img.name = 'alsc_5000k_0.dng'
+    img.col = 5000
+    img.w, img.h = 2 * 330, 2 * 250
+    img.order = (2, 0, 3, 1)
+    img.blacklevel_16 = 4096
+    img.channels = [rng.integers(8000, 60000, (250, 330), dtype=np.uint16) for _ in range(4)]
+    if reduced:
+        img.alsc_grids = {GRID: alsc_cell_means(img, GRID)}
+        img.channels = []
+    return img
+
+
+@pytest.mark.parametrize('colour', [True, False])
+def test_reduced_image_gives_identical_tables(colour):
+    # The loader keeps only the cell means of an ALSC frame; the tables calculated
+    # from them must match the full-channel calculation bit for bit.
+    full = alsc(Camera('out.json', json={}), _alsc_image(reduced=False), colour, GRID)
+    reduced = alsc(Camera('out.json', json={}), _alsc_image(reduced=True), colour, GRID)
+    for a, b in zip(full, reduced, strict=True):
+        if a is None:
+            assert b is None
+        else:
+            np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_reduced_image_rejects_other_grid():
+    with pytest.raises(ValueError, match='not computed'):
+        alsc(Camera('out.json', json={}), _alsc_image(reduced=True), True, (32, 32))
 
 
 def _vignetted(corner_level: float) -> np.ndarray:
