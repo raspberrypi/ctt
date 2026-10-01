@@ -413,4 +413,8 @@ def get_macbeth_chart(img: np.ndarray, ref_data: tuple) -> tuple:
         return (max_cor, best_map_col_norm, fit_coords, success_msg)
 
     except MacbethError as error:
-        return (0, None, None, error)
+        # Return the text, not the exception: its traceback references this frame and,
+        # through it, every caller up to the run itself. The caller keeps the message in
+        # a local, which would close that into a reference cycle and pin the (large)
+        # image arrays in those frames until the cyclic garbage collector happens to run.
+        return (0, None, None, str(error))
