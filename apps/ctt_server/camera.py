@@ -66,6 +66,10 @@ class Picamera2Camera:
         self._ev = 0.0  # exposure compensation (EV); tracked here as metadata may omit it
         self._auto = True  # AeEnable state; tracked so we report it reliably (AeLocked is ambiguous)
         self._fps = 30.0  # framerate target; 0 = unconstrained (variable frame duration)
+        # Manual exposure/gain and white balance as last set, re-applied after a still
+        # capture: reconfiguring the pipeline resets controls to the config's defaults.
+        self._manual_exposure: dict = {}
+        self._awb_controls: dict = {}
         # Optionally start the pipeline with a specific tuning file (e.g. a freshly
         # generated CTT tuning, for the Results-page live preview test). None = the
         # camera's built-in default tuning.
@@ -232,6 +236,7 @@ class Picamera2Camera:
             self._auto = bool(controls['auto_exposure'])
         if self._auto:
             new['AeEnable'] = True
+            self._manual_exposure = {}
         else:
             # Manual: disable AEC and apply the requested exposure/gain.
             new['AeEnable'] = False
@@ -239,6 +244,7 @@ class Picamera2Camera:
                 new['ExposureTime'] = int(controls['exposure'])
             if controls.get('gain') is not None:
                 new['AnalogueGain'] = float(controls['gain'])
+            self._manual_exposure.update({k: new[k] for k in ('ExposureTime', 'AnalogueGain') if k in new})
         if 'ev' in controls and controls['ev'] is not None:
             self._ev = float(controls['ev'])
             new['ExposureValue'] = self._ev  # AEC bias; only affects auto-exposure
@@ -247,11 +253,13 @@ class Picamera2Camera:
             new['FrameDurationLimits'] = self._frame_duration_limits()
         if 'awb' in controls:
             new['AwbEnable'] = bool(controls['awb'])
+            self._awb_controls = {} if new['AwbEnable'] else {'AwbEnable': False}
         if controls.get('colour_gains') is not None:
             # Explicit gains imply manual white balance.
             r_gain, b_gain = controls['colour_gains']
             new['AwbEnable'] = False
             new['ColourGains'] = (float(r_gain), float(b_gain))
+            self._awb_controls = {'AwbEnable': False, 'ColourGains': new['ColourGains']}
         if new:
             self._picam2.set_controls(new)
             time.sleep(0.3)  # let the pipeline apply the new controls
@@ -269,41 +277,47 @@ class Picamera2Camera:
         return buf.tobytes()
 
     def capture_png(self) -> bytes:
-        """Capture a full-resolution processed still (current tuning applied) as PNG.
+        """Snapshot the live preview as a PNG at the selected sensor mode's resolution.
 
-        Briefly switches the pipeline to a full-sensor-resolution still mode, then
-        back to the preview/video config — so the result is the full field of view
-        at native resolution, not the downscaled preview stream.
+        The live main stream is only preview-sized, so the frame comes from a brief
+        switch to a still configuration at the mode's resolution. That still is held
+        to the preview frame's exposure, gain and colour gains, with the preview's ISP
+        controls (e.g. denoise), so it matches what is on screen. Switching back
+        resets the controls to the config's defaults, so the user's exposure and white
+        balance settings are re-applied and the live preview carries on unchanged.
         """
         import cv2  # noqa: PLC0415
 
         with self._lock:
+            md = self._picam2.capture_metadata()
+            video = self._video_config()
+            controls = dict(video.get('controls', {}))
+            controls.update(
+                AeEnable=False,
+                ExposureTime=int(md['ExposureTime']),
+                AnalogueGain=float(md['AnalogueGain']),
+            )
+            if md.get('ColourGains'):
+                controls.update(AwbEnable=False, ColourGains=tuple(float(g) for g in md['ColourGains']))
             still = self._picam2.create_still_configuration(
                 main={'size': self.resolution, 'format': 'RGB888'},
                 sensor=self._sensor_config(),
                 transform=self._transform(),
+                controls=controls,
             )
-            arr = self._picam2.switch_mode_and_capture_array(still, 'main')
+            try:
+                arr = self._picam2.switch_mode_and_capture_array(still, 'main')
+            finally:
+                self._picam2.set_controls(
+                    {
+                        'AeEnable': self._auto,
+                        'AwbEnable': True,
+                        'ExposureValue': self._ev,
+                        **self._manual_exposure,
+                        **self._awb_controls,
+                    }
+                )
         # Picamera2 'RGB888' arrays are BGR-ordered, which is exactly what cv2 wants.
-        ok, buf = cv2.imencode('.png', arr)
-        if not ok:
-            raise CameraError('Failed to encode PNG')
-        return buf.tobytes()
-
-    def capture_preview_png(self) -> bytes:
-        """Snapshot the current live preview frame as a PNG (zero shutter lag).
-
-        Grabs the running main stream straight from the pipeline — no mode switch —
-        so the snapshot is exactly the frame on screen, at the selected mode's preview
-        resolution, with the manual exposure/gain (and the ISP denoise state) left
-        untouched. Switching to a full-resolution still mode (capture_png) reverts
-        auto-exposure and steps the live preview's brightness, which is why the
-        on-screen snapshot avoids it.
-        """
-        import cv2  # noqa: PLC0415
-
-        with self._lock:
-            arr = self._picam2.capture_array('main')  # RGB888 == BGR-ordered == cv2 native
         ok, buf = cv2.imencode('.png', arr)
         if not ok:
             raise CameraError('Failed to encode PNG')

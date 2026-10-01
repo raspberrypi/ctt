@@ -37,7 +37,7 @@
         <span x-text="busy ? 'Starting…' : '▶ Start live preview'"></span>
       </button>
       <button class="btn" x-show="testing" @click="capturePng()" :disabled="busy">
-        <span x-text="busy ? 'Capturing…' : '⬇ Capture PNG (full res)'"></span>
+        <span x-text="busy ? 'Capturing…' : '⬇ Capture PNG'"></span>
       </button>
       <button class="btn ghost" x-show="testing" @click="restoreDefault()" :disabled="busy">■ Stop (restore default)</button>
     </div>

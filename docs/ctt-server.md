@@ -182,8 +182,8 @@ restores the default tuning.
 
 While previewing you can:
 
-- inspect detail with a click-and-hold loupe magnifier, and capture a
-  full-resolution PNG;
+- inspect detail with a click-and-hold loupe magnifier, and capture a PNG
+  snapshot of the preview at the selected sensor mode's resolution;
 - control exposure — auto with EV compensation, or manual exposure time and
   analogue gain, plus an FPS limit (0 = unconstrained, allowing long
   exposures) and H/V flips;
@@ -424,7 +424,7 @@ tagging or sweeping against a bad reading. The web UI shows out-of-range values 
 | POST | `/projects/<name>/tuning/custom/<target>/delete` | Revert: remove the custom file |
 | POST | `/projects/<name>/preview-test` | Restart the camera with this project's tuning; `{"kind": "generated"\|"custom"}` (custom files are canary-tested in a subprocess first) |
 | POST | `/api/preview-default` | Restore the built-in default tuning |
-| GET | `/projects/<name>/preview-capture` | Full-resolution PNG still from the live preview |
+| GET | `/projects/<name>/preview-capture` | PNG snapshot of the live preview at the selected sensor mode's resolution |
 
 ### MTF
 
