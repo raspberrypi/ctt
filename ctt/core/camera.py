@@ -9,6 +9,8 @@ import re
 import time
 from pathlib import Path
 
+from ..algorithms.alsc import alsc_cell_means
+from ..algorithms.black_level import reduce_dark_image
 from ..output.json_formatter import pretty_print
 from ..utils.tools import get_photos
 from .image_loader import load_image, load_image_group
@@ -124,8 +126,20 @@ class Camera:
             logfile.write(str(self.log))
 
     def add_imgs(
-        self, directory: str, mac_config: tuple, blacklevel: int = -1, images: list[str] | None = None
+        self,
+        directory: str,
+        mac_config: tuple,
+        blacklevel: int = -1,
+        images: list[str] | None = None,
+        alsc_grid_size: tuple[int, int] | None = None,
     ) -> None:
+        """Load and classify the calibration images in directory.
+
+        Frames are reduced at load to what their calibrations read, as a run cannot
+        hold every full-resolution frame of a high-resolution sensor: dark frames keep
+        their channel statistics, Macbeth bursts their exact sums (load_image_group),
+        and, when alsc_grid_size is given, ALSC frames their cell means on that grid.
+        """
         self.log_new_sec('Image Loading', cal=False)
         logger.info(f'\nLoading images from {directory}')
         self.log += f'\nDirectory: {directory}'
@@ -164,6 +178,10 @@ class Camera:
                 if col is not None:
                     img.col = col
                     img.name = filename
+                    if alsc_grid_size is not None:
+                        grid = tuple(alsc_grid_size)
+                        img.alsc_grids = {grid: alsc_cell_means(img, grid)}
+                        img.channels = []
                     self.log += f'\nColour temperature: {col} K'
                     self.imgs_alsc.append(img)
                     if blacklevel != -1:
@@ -189,6 +207,7 @@ class Camera:
                 # Dark frames need no chart detection or demosaic; only the raw
                 # channel statistics are consumed (black level measurement).
                 img = load_image(self, address, mac=False, demosaic=False)
+                reduce_dark_image(img)
                 self.log += '\nIdentified as a dark frame'
                 img.name = filename
                 self.imgs_dark.append(img)

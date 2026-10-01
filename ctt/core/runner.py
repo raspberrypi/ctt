@@ -212,7 +212,7 @@ def run_ctt(
         cam = Camera(json_output, json=json_template)
         cam.output_dir = output_dir
         cam.log_user_input(json_output, directory, config, log_output)
-        cam.add_imgs(directory, mac_config, blacklevel, images=images)
+        cam.add_imgs(directory, mac_config, blacklevel, images=images, alsc_grid_size=grid_size)
         # Infer ALSC-only when only ALSC images present (e.g. mono LSC-only from DNGs),
         # and black-level-only when the directory holds nothing but dark frames.
         if len(cam.imgs) == 0 and len(cam.imgs_cac) == 0 and len(cam.imgs_alsc) > 0:

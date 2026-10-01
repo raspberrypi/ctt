@@ -36,7 +36,19 @@ class Image:
     patch_size: int | None = None
     frames_averaged: int = 1  # burst frames averaged into this image (in-CTT, by filename group)
     patches_single: list | None = None  # patches from one burst frame (true noise statistics)
+    # Reductions held in place of the full-resolution channels once those are dropped
+    # at load (a frame's channels are ~100 MB at 50 MP, so a run cannot keep them all).
+    channel_sums: list | None = None  # exact integer burst sums; see channel_values()
+    channel_means: list | None = None  # per-channel mean, storage order (dark frames)
+    channel_stds: list | None = None  # per-channel std, storage order (dark frames)
+    alsc_grids: dict | None = None  # grid_size -> (g, r, b) cell means, before black level
     ver: int = 0
+
+    def channel_values(self, i: int) -> np.ndarray:
+        """Channel i in storage order, rebuilding a burst average from its exact sums."""
+        if self.channel_sums is not None:
+            return self.channel_sums[i] / self.frames_averaged
+        return self.channels[i]
 
     def get_patches(self, cen_coords: list, size: int | None = None) -> int:
         cen_coords = list(np.array(cen_coords[0]).astype(np.int32))

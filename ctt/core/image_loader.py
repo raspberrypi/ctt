@@ -251,20 +251,27 @@ def load_image_group(
         return load_image(cam, im_strs[0], mac_config, demosaic=demosaic)
 
     # Average the frames one at a time: holding a whole burst in memory at once
-    # is a sizeable chunk of a Pi's RAM. float64 sums of uint16 data are exact,
-    # so this matches np.mean over the stacked frames bit for bit.
+    # is a sizeable chunk of a Pi's RAM. The uint16 frames are summed exactly in
+    # uint32 (enough for 65537 frames), and float64 division of the exact sums
+    # matches np.mean over the stacked frames bit for bit.
     base = dng_load_image(cam, im_strs[0], demosaic=demosaic)
     single_channels = base.channels
-    sums = [ch.astype(np.float64) for ch in single_channels]
+    sums = [ch.astype(np.uint32) for ch in single_channels]
     for im_str in im_strs[1:]:
         img = dng_load_image(cam, im_str, demosaic=False)
         for i, ch in enumerate(img.channels):
             sums[i] += ch
-    base.channels = [s / len(im_strs) for s in sums]
+        del img
+    base.channel_sums = sums
     base.frames_averaged = len(im_strs)
+    base.channels = [base.channel_values(i) for i in range(len(sums))]
     cam.log += f'\nAveraged {len(im_strs)} burst frames'
 
-    if not _detect_macbeth(cam, base, mac_config, base.name):
+    detected = _detect_macbeth(cam, base, mac_config, base.name)
+    # Chart detection and patch sampling were the last full-resolution uses of the
+    # float64 average; later consumers rebuild it from the sums via channel_values().
+    base.channels = []
+    if not detected:
         return None
 
     # Patches of one un-averaged frame, sampled at the same chart coordinates

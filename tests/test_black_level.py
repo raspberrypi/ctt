@@ -115,10 +115,17 @@ class TestCameraDarkClassification:
         monkeypatch.setattr(
             camera_mod,
             'load_image',
-            lambda cam, address, mac_config=None, mac=True, demosaic=True: types.SimpleNamespace(),
+            lambda cam, address, mac_config=None, mac=True, demosaic=True: types.SimpleNamespace(
+                channels=[np.full((4, 4), v, dtype=np.uint16) for v in (10, 20, 30, 40)]
+            ),
         )
         cam = camera_mod.Camera('out.json', json={})
         cam.add_imgs(str(tmp_path) + '/', (0, 0))
         assert [i.name for i in cam.imgs_dark] == ['dark_0.dng']
+        # Dark frames are reduced to their channel statistics at load.
+        dark = cam.imgs_dark[0]
+        assert dark.channel_means == [10.0, 20.0, 30.0, 40.0]
+        assert dark.channel_stds == [0.0] * 4
+        assert dark.channels == []
         assert cam.imgs == []  # the dark frame must not be treated as Macbeth
         assert len(cam.imgs_alsc) == 1

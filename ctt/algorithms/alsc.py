@@ -259,21 +259,22 @@ def alsc(
     """Calculate g/r and g/b for grid points for a single image."""
     cam.log += f'\nProcessing image: {img.name}'
     grid_w, grid_h = grid_size
-    # Get channels in correct order.
-    channels = [img.channels[i] for i in img.order]
-    # Calculate size of single rectangle; divisions ensure final row/column of cells has non-zero pixels.
-    w, h = img.w / 2, img.h / 2
-    dx, dy = int((w - 1) // (grid_w - 1)), int((h - 1) // (grid_h - 1))
+    w, h, dx, dy = alsc_cell_size(img, grid_size)
+    if img.alsc_grids is not None:
+        try:
+            g_grid, r_grid, b_grid = img.alsc_grids[tuple(grid_size)]
+        except KeyError:
+            raise ValueError(f'{img.name}: ALSC cell means were not computed for a {grid_size} grid') from None
+    else:
+        g_grid, r_grid, b_grid = alsc_cell_means(img, grid_size)
 
-    # Average the green channels into one.
-    av_ch_g = np.mean((channels[1:3]), axis=0)
     if do_alsc_colour:
-        # Obtain grid_w x grid_h grid of intensities for each channel and subtract black level.
+        # Subtract black level from the grid_w x grid_h cell intensities of each channel.
         # Floor at 1 so a dark/vignetted cell at or below black level can't make a ratio
         # divide by zero (inf/nan) or go negative (which would flip the min-normalisation).
-        g = np.maximum(get_grid(av_ch_g, dx, dy, grid_size) - img.blacklevel_16, 1)
-        r = np.maximum(get_grid(channels[0], dx, dy, grid_size) - img.blacklevel_16, 1)
-        b = np.maximum(get_grid(channels[3], dx, dy, grid_size) - img.blacklevel_16, 1)
+        g = np.maximum(g_grid - img.blacklevel_16, 1)
+        r = np.maximum(r_grid - img.blacklevel_16, 1)
+        b = np.maximum(b_grid - img.blacklevel_16, 1)
         # Calculate ratios as 32-bit for medianBlur; then median blur to remove peaks.
         cr = np.reshape(g / r, (grid_h, grid_w)).astype('float32')
         cb = np.reshape(g / b, (grid_h, grid_w)).astype('float32')
@@ -290,13 +291,38 @@ def alsc(
 
     else:
         # Only perform calculations for luminance shading. Floor at 1 (see colour branch).
-        g = np.maximum(get_grid(av_ch_g, dx, dy, grid_size) - img.blacklevel_16, 1)
+        g = np.maximum(g_grid - img.blacklevel_16, 1)
         cg = np.reshape(1 / g, (grid_h, grid_w)).astype('float32')
         cg = cv2.medianBlur(cg, 3).astype('float64')
         cg = cg / np.min(cg)
         cg_clamp = [min(v, max_gain) for v in cg.flatten()]
 
         return img.col, None, None, cg_clamp, (w, h, dx, dy)
+
+
+def alsc_cell_size(img: Image, grid_size: tuple[int, int]) -> tuple:
+    """Channel size and grid cell size; divisions ensure the final row/column of cells has pixels."""
+    grid_w, grid_h = grid_size
+    w, h = img.w / 2, img.h / 2
+    return w, h, int((w - 1) // (grid_w - 1)), int((h - 1) // (grid_h - 1))
+
+
+def alsc_cell_means(img: Image, grid_size: tuple[int, int]) -> tuple:
+    """Green (Gr/Gb averaged), red and blue cell means of an ALSC image, before black level.
+
+    These are all that the ALSC calibration reads from an image's channels, so the
+    loader can keep them in place of the full-resolution channels (Image.alsc_grids).
+    """
+    _, _, dx, dy = alsc_cell_size(img, grid_size)
+    # Get channels in correct order.
+    channels = [img.channels[i] for i in img.order]
+    # Average the green channels into one.
+    av_ch_g = np.mean((channels[1:3]), axis=0)
+    return (
+        get_grid(av_ch_g, dx, dy, grid_size),
+        get_grid(channels[0], dx, dy, grid_size),
+        get_grid(channels[3], dx, dy, grid_size),
+    )
 
 
 def get_grid(chan: np.ndarray, dx: int, dy: int, grid_size: tuple[int, int]) -> np.ndarray:

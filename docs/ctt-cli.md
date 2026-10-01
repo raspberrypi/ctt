@@ -160,6 +160,13 @@ If a file is skipped (e.g. missing colour temp/lux in the filename, or Macbeth
 chart not found in the image), the tool prints a short message (e.g. colour
 temp/lux not in filename, or Macbeth not found) with the filename.
 
+Images are reduced at load to the statistics their calibrations use, so memory
+use scales mainly with the number of Macbeth images (or burst groups) rather
+than the total file count. ALSC frames keep only their grid cell means and dark
+frames their channel statistics. A Macbeth image holds roughly 2 bytes per
+pixel, or 4 per pixel for a burst group. As a guide, a 50 MP sensor with 8
+Macbeth burst groups, 20 ALSC frames and 5 dark frames peaks at about 3 GB.
+
 ## Calibrations performed
 
 | Algorithm | Key | Description |
